@@ -1,0 +1,11 @@
+{
+  "name": "MAKE ME LEARN",
+  "description": "A dark premium AI-powered learning platform with personalized courses, intelligent tutors, and background A2A agents for continuous validation and improvement.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

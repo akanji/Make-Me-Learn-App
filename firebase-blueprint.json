@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Platform user with learning progress and subscription status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "country": { "type": "string" },
+        "linkedin": { "type": "string" },
+        "plan": { "type": "string", "enum": ["free", "trial", "monthly", "yearly"] },
+        "trialStart": { "type": "string", "format": "date-time" },
+        "trialEnd": { "type": "string", "format": "date-time" },
+        "subscriptionStatus": { "type": "string", "enum": ["inactive", "pending_payment", "active"] },
+        "nameVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "A user's enrollment in a course",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "enrolledAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["in-progress", "completed"] },
+        "progress": { "type": "number" },
+        "completedModules": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Certificate": {
+      "title": "Certificate",
+      "description": "A certificate earned by a user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "issueDate": { "type": "string", "format": "date-time" },
+        "certificateId": { "type": "string" },
+        "score": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and subscription data"
+    },
+    "/users/{userId}/enrollments/{courseId}": {
+      "schema": "Enrollment",
+      "description": "Course enrollment and modular progress"
+    },
+    "/users/{userId}/certificates/{certId}": {
+      "schema": "Certificate",
+      "description": "Earned certificates"
+    }
+  }
+}

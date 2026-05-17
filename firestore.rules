@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users collection - Allow direct access for "direct login" system
+    match /users/{userId} {
+      // Allow searching for a user by email (for login/signup check)
+      allow list: if true; 
+      
+      // Allow getting a specific user profile
+      allow get: if true;
+
+      // Allow creating a new user profile
+      allow create: if true;
+
+      // Allow updating own profile (ideally we'd check an ID, but in direct mode we trust the client)
+      allow update: if true;
+      
+      // Subcollections (enrollments, certificates)
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
