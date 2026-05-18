@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 
 export function Splash() {
-  const { signup } = useAuth();
+  const { signup, continueAsGuest } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +60,8 @@ export function Splash() {
     }
   };
 
+  const isSignInTab = mode === 'login';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mode === 'reset') return handleResetPassword(e);
@@ -74,19 +76,38 @@ export function Splash() {
     setError(null);
 
     try {
-      if (mode === 'login') {
+      const email = formData.email.toLowerCase();
+      const password = formData.password;
+
+      if (isSignInTab) {
         try {
-          await signInWithEmailAndPassword(auth, formData.email.toLowerCase(), formData.password);
+          // FIX: Use sign-in method for existing emails
+          await signInWithEmailAndPassword(auth, email, password);
           toast.success("Welcome back!");
         } catch (err: any) {
-          // If login fails, check if user exists in Firestore (legacy "direct access" user)
-          // and maybe auto-create them in Firebase Auth if the password matches?
-          // For simplicity, we just show the error.
+          // Check for legacy migration
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+            const q = query(collection(db, 'users'), where('email', '==', email));
+            const querySnapshot = await getDocs(q);
+            
+            if (!querySnapshot.empty) {
+              const legacyUser = querySnapshot.docs[0].data();
+              if (legacyUser.password === password) {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const firebaseUser = userCredential.user;
+                const updatedData: any = { ...legacyUser, uid: firebaseUser.uid };
+                delete updatedData.password;
+                await signup(updatedData as any);
+                toast.success("Welcome back! Your account has been securely migrated.");
+                return;
+              }
+            }
+          }
           throw err;
         }
       } else {
-        // Sign up
-        const userCredential = await createUserWithEmailAndPassword(auth, formData.email.toLowerCase(), formData.password);
+        // Sign up method only for the "Create Account" tab
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const firebaseUser = userCredential.user;
 
         const trialStart = new Date();
@@ -96,7 +117,7 @@ export function Splash() {
         const newUserData: any = {
           uid: firebaseUser.uid,
           name: formData.name,
-          email: formData.email.toLowerCase(),
+          email: email,
           country: formData.country,
           plan: 'trial',
           trialStart: Timestamp.fromDate(trialStart),
@@ -112,15 +133,19 @@ export function Splash() {
         toast.success("Account created successfully!");
       }
     } catch (err: any) {
-      console.error(err);
       let message = "An unexpected error occurred.";
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        message = "Invalid email or password.";
-      } else if (err.code === 'auth/email-already-in-use') {
-        message = "Email already registered. Try signing in.";
-      } else if (err.message) {
+      const errorCode = err.code || (err.message?.includes('auth/') ? err.message.match(/auth\/[a-z0-9-]+/)?.[0] : null);
+      
+      if (errorCode === 'auth/user-not-found' || errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential') {
+        message = "Invalid email or password. Please check your credentials.";
+      } else if (errorCode === 'auth/email-already-in-use') {
+        message = "This email is already in use. If you have an account, please sign in.";
+      } else if (errorCode === 'auth/weak-password') {
+        message = "Password is too weak. It must be at least 6 characters.";
+      } else if (err.message && !err.message.includes('Firebase:')) {
         message = err.message;
       }
+      
       setError(message);
       toast.error(message);
     } finally {
@@ -260,6 +285,16 @@ export function Splash() {
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : mode === 'reset' ? 'Send Reset Link' : (mode === 'login' ? 'Sign In' : 'Start 7-Day Free Trial')}
           </button>
+
+          {!loading && mode !== 'reset' && (
+            <button 
+              type="button" 
+              onClick={() => continueAsGuest()}
+              className="w-full bg-surface-elevated hover:bg-surface-elevated/80 text-white py-4 rounded-2xl font-bold text-lg border border-brand-border transition-all flex items-center justify-center gap-2"
+            >
+              Continue as Guest
+            </button>
+          )}
         </form>
 
         <div className="mt-8 text-center text-sm text-muted-text">

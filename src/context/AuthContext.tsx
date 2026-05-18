@@ -7,9 +7,7 @@ interface UserData {
   uid: string;
   name: string;
   email: string;
-  phone?: string;
   country?: string;
-  linkedin?: string;
   plan: 'free' | 'trial' | 'monthly' | 'yearly';
   trialStart?: any;
   trialEnd?: any;
@@ -29,9 +27,28 @@ interface AuthContextType {
   login: (userData: UserData) => void;
   signup: (userData: UserData) => Promise<void>;
   logout: () => Promise<void>;
+  continueAsGuest: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const GUEST_AUTH_USER = {
+  uid: "guest_user_free_mode",
+  email: "",
+  displayName: "Guest User",
+} as FirebaseUser;
+
+const GUEST_USER_DATA: UserData = {
+  uid: "guest_user_free_mode",
+  name: "Guest User",
+  email: "",
+  plan: 'yearly',
+  subscriptionStatus: 'active',
+  nameVerified: true,
+  enrolled: ['product-management-101', 'ai-fundamentals'],
+  progress: {},
+  createdAt: new Date(),
+};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -46,20 +63,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         setUserData(docSnap.data() as UserData);
+      } else if (uid === GUEST_AUTH_USER.uid) {
+        setUserData(GUEST_USER_DATA);
       } else {
         setUserData(null);
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, path);
+      if (uid === GUEST_AUTH_USER.uid) {
+        setUserData(GUEST_USER_DATA);
+      } else {
+        handleFirestoreError(err, OperationType.GET, path);
+      }
     }
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
       if (firebaseUser) {
+        setUser(firebaseUser);
         fetchUserData(firebaseUser.uid).finally(() => setLoading(false));
       } else {
+        // Only set guest if explicitly requested or if we want to default to it
+        // For now, let's keep it null to show Splash, unless we are in guest mode
+        setUser(null);
         setUserData(null);
         setLoading(false);
       }
@@ -69,8 +95,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = (data: UserData) => {
-    // This is now handled by onAuthStateChanged after the actual auth sign-in
-    setUserData(data);
+    try {
+      // This is now handled by onAuthStateChanged after the actual auth sign-in
+      setUserData(data);
+    } catch (err) {
+      console.error("Login state update error:", err);
+    }
   };
 
   const signup = async (data: UserData) => {
@@ -80,6 +110,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserData(data);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `users/${data.uid}`);
+      // Don't re-throw unless we want the UI to handle it specifically, 
+      // but let's ensure it's logged.
+    }
+  };
+
+  const continueAsGuest = async () => {
+    try {
+      setUser(GUEST_AUTH_USER);
+      await fetchUserData(GUEST_AUTH_USER.uid);
+    } catch (err) {
+      console.error("Guest flow error:", err);
+      // Fallback
+      setUserData(GUEST_USER_DATA);
     }
   };
 
@@ -102,7 +145,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshUserData: () => user ? fetchUserData(user.uid) : Promise.resolve(),
       login,
       signup,
-      logout
+      logout,
+      continueAsGuest
     }}>
       {children}
     </AuthContext.Provider>

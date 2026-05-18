@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { User, Mail, Phone, Globe, Linkedin, ShieldCheck, Camera, Save } from 'lucide-react';
+import { User, Mail, Globe, ShieldCheck, Camera, Save } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export function Profile() {
@@ -12,9 +12,8 @@ export function Profile() {
   
   const [formData, setFormData] = useState({
     name: userData?.name || '',
-    phone: userData?.phone || '',
+    email: userData?.email || '',
     country: userData?.country || '',
-    linkedin: userData?.linkedin || ''
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -98,24 +97,13 @@ export function Profile() {
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-text" size={18} />
                   <input 
-                    className="w-full bg-surface-elevated/30 border border-brand-border rounded-xl py-3 pl-12 pr-4 text-muted-text cursor-not-allowed"
-                    value={userData?.email || ''}
-                    disabled
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-muted-text">Phone Number</label>
-                <div className="relative">
-                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-text" size={18} />
-                  <input 
                     className="w-full bg-surface-elevated/50 border border-brand-border rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:border-primary transition-all"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                    value={formData.email}
+                    onChange={(e) => setFormData({...formData, email: e.target.value})}
                   />
                 </div>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 lg:col-span-2">
                 <label className="text-xs font-black uppercase tracking-widest text-muted-text">Country</label>
                 <div className="relative">
                   <Globe className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-text" size={18} />
@@ -125,19 +113,6 @@ export function Profile() {
                     onChange={(e) => setFormData({...formData, country: e.target.value})}
                   />
                 </div>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-muted-text">LinkedIn Profile</label>
-              <div className="relative">
-                <Linkedin className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-text" size={18} />
-                <input 
-                  className="w-full bg-surface-elevated/50 border border-brand-border rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:border-primary transition-all"
-                  placeholder="https://linkedin.com/in/username"
-                  value={formData.linkedin}
-                  onChange={(e) => setFormData({...formData, linkedin: e.target.value})}
-                />
               </div>
             </div>
 

@@ -183,3 +183,5 @@ export function Dashboard() {
     </div>
   );
 }
+
+export const MainDashboard = Dashboard;

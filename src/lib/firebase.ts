@@ -30,6 +30,8 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const isPermissionError = error instanceof Error && (error.message.includes('permission') || error.message.includes('insufficient'));
+  
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -42,8 +44,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  
+  console.error('[Firestore Error Details]:', JSON.stringify(errInfo));
+  
+  if (isPermissionError) {
+    throw new Error("Access denied: You don't have permission to perform this action. You may need to sign in again.");
+  }
+  
+  throw new Error(error instanceof Error ? error.message : "A database error occurred.");
 }
 
 async function testConnection() {
