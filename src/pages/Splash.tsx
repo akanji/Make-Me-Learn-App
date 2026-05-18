@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { doc, getDocs, collection, query, where, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { GraduationCap, Mail, Lock, User, MapPin, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 
 export function Splash() {
-  const { login, signup } = useAuth();
+  const { signup } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,7 @@ export function Splash() {
     
     if (mode !== 'reset') {
       if (!formData.password) return "Password is required";
-      if (formData.password.length < 4) return "Password must be at least 4 characters";
+      if (formData.password.length < 6) return "Password must be at least 6 characters";
     }
     
     return null;
@@ -44,16 +45,16 @@ export function Splash() {
     setLoading(true);
     setError(null);
     try {
-      // Mock reset for direct access
-      toast.success("In direct mode, you can just re-register or use any password if you forget.");
-      setSuccessMessage("Direct Access: Password reset not required. Try signing in.");
+      await sendPasswordResetEmail(auth, formData.email.toLowerCase());
+      toast.success("Password reset email sent!");
+      setSuccessMessage("Check your inbox for a secure link to reset your password.");
       setTimeout(() => {
         setMode('login');
         setSuccessMessage(null);
       }, 5000);
     } catch (err: any) {
       console.error(err);
-      setError("Failed to process request.");
+      setError(err.message || "Failed to process request.");
     } finally {
       setLoading(false);
     }
@@ -74,52 +75,28 @@ export function Splash() {
 
     try {
       if (mode === 'login') {
-        const q = query(collection(db, 'users'), where('email', '==', formData.email.toLowerCase()));
-        let querySnapshot;
         try {
-          querySnapshot = await getDocs(q);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.LIST, 'users');
-          return; // should not reach here as handleFirestoreError throws
+          await signInWithEmailAndPassword(auth, formData.email.toLowerCase(), formData.password);
+          toast.success("Welcome back!");
+        } catch (err: any) {
+          // If login fails, check if user exists in Firestore (legacy "direct access" user)
+          // and maybe auto-create them in Firebase Auth if the password matches?
+          // For simplicity, we just show the error.
+          throw err;
         }
-        
-        if (querySnapshot.empty) {
-          throw new Error("No account found with this email.");
-        }
-
-        const userData = querySnapshot.docs[0].data() as any;
-        // Simple password check (Note: In a real app we'd hash, but user asked for "direct" and "no auth error")
-        if (userData.password && userData.password !== formData.password) {
-          throw new Error("Incorrect password.");
-        }
-
-        login(userData);
-        toast.success("Welcome to Learning!");
       } else {
         // Sign up
-        const q = query(collection(db, 'users'), where('email', '==', formData.email.toLowerCase()));
-        let querySnapshot;
-        try {
-          querySnapshot = await getDocs(q);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.LIST, 'users');
-          return;
-        }
-        
-        if (!querySnapshot.empty) {
-          throw new Error("Email already registered. Try signing in.");
-        }
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email.toLowerCase(), formData.password);
+        const firebaseUser = userCredential.user;
 
-        const uid = btoa(formData.email.toLowerCase()).replace(/=/g, '');
         const trialStart = new Date();
         const trialEnd = new Date();
         trialEnd.setDate(trialEnd.getDate() + 7);
 
         const newUserData: any = {
-          uid,
+          uid: firebaseUser.uid,
           name: formData.name,
           email: formData.email.toLowerCase(),
-          password: formData.password, // Storing for direct login simplicity as requested
           country: formData.country,
           plan: 'trial',
           trialStart: Timestamp.fromDate(trialStart),
@@ -136,7 +113,14 @@ export function Splash() {
       }
     } catch (err: any) {
       console.error(err);
-      const message = err.message || "An unexpected error occurred.";
+      let message = "An unexpected error occurred.";
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        message = "Invalid email or password.";
+      } else if (err.code === 'auth/email-already-in-use') {
+        message = "Email already registered. Try signing in.";
+      } else if (err.message) {
+        message = err.message;
+      }
       setError(message);
       toast.error(message);
     } finally {

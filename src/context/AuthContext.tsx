@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 
 interface UserData {
   uid: string;
@@ -20,20 +21,20 @@ interface UserData {
 }
 
 interface AuthContextType {
-  user: any | null;
+  user: FirebaseUser | null;
   userData: UserData | null;
   loading: boolean;
   error: string | null;
   refreshUserData: () => Promise<void>;
   login: (userData: UserData) => void;
   signup: (userData: UserData) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,36 +55,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('learn_user');
-    if (storedUser) {
-      const parsedUser = JSON.parse(storedUser);
-      setUser(parsedUser);
-      fetchUserData(parsedUser.uid).finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        fetchUserData(firebaseUser.uid).finally(() => setLoading(false));
+      } else {
+        setUserData(null);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const login = (data: UserData) => {
-    const authUser = { uid: data.uid, email: data.email };
-    setUser(authUser);
+    // This is now handled by onAuthStateChanged after the actual auth sign-in
     setUserData(data);
-    localStorage.setItem('learn_user', JSON.stringify(authUser));
   };
 
   const signup = async (data: UserData) => {
     try {
+      // In signup, we assume Firebase Auth user is already created and signed in
       await setDoc(doc(db, 'users', data.uid), data);
-      login(data);
+      setUserData(data);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `users/${data.uid}`);
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    setUserData(null);
-    localStorage.removeItem('learn_user');
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setUserData(null);
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
   };
 
   return (

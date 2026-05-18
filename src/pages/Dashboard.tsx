@@ -23,7 +23,7 @@ export function Dashboard() {
     <div className="p-6 lg:p-10 space-y-8 max-w-7xl mx-auto">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-display font-black">Welcome to Learning</h1>
+          <h1 className="text-4xl font-display font-black">Welcome to our Learning and Development Platform</h1>
           <p className="text-muted-text mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
         </div>
         <div className="bg-surface-card border border-brand-border px-6 py-3 rounded-2xl flex items-center gap-4">
