@@ -3,29 +3,182 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, Modality, GenerateContentResponse, GenerateVideosOperation, VideoGenerationReferenceType } from "@google/genai";
 import dotenv from "dotenv";
+import Stripe from "stripe";
+import * as admin from 'firebase-admin';
+import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
 
 dotenv.config();
+
+// Initialize Firebase Admin
+admin.initializeApp({
+  projectId: firebaseConfig.projectId
+});
+const adminDb = admin.firestore();
 
 const app = express();
 const PORT = 3000;
 
+// Stripe Webhook handler
+app.post("/api/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
+  const stripe = getStripe();
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
+  try {
+    if (!sig || !endpointSecret) {
+      throw new Error("Missing signature or webhook secret");
+    }
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err: any) {
+    console.error(`Webhook Error: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object as Stripe.Checkout.Session;
+      const uid = session.metadata?.uid;
+      const plan = session.metadata?.planType as 'monthly' | 'yearly';
+      
+      if (uid && plan) {
+        try {
+          await adminDb.collection('users').doc(uid).update({
+            plan: plan,
+            subscriptionStatus: 'active',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          console.log(`Updated plan for user ${uid} to ${plan}`);
+        } catch (dbErr) {
+          console.error("Error updating user plan in Firestore:", dbErr);
+        }
+      }
+      break;
+    default:
+      console.log(`Unhandled event type ${event.type}`);
+  }
+
+  res.json({ received: true });
+});
+
 app.use(express.json({ limit: '50mb' }));
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
+let aiClient: GoogleGenAI | null = null;
+function getAI(): GoogleGenAI {
+  if (!aiClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) throw new Error("GEMINI_API_KEY is missing");
+    aiClient = new GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return aiClient;
+}
+
+let stripeClient: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!stripeClient) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error("STRIPE_SECRET_KEY is missing");
+    stripeClient = new Stripe(key);
+  }
+  return stripeClient;
+}
+
+const PRICE_IDS = {
+  monthly: 'price_1TVOTlBMbxh6jv0CQyGrtMLL',
+  yearly: 'price_1TVOYDBMbxh6jv0C3C9Y4AX9',
+};
+
+// Helper to check trial/subscription status securely
+const checkAccess = async (userDataClient: any) => {
+  if (!userDataClient || !userDataClient.uid) return { allowed: false, message: "Authentication required" };
+  
+  try {
+    const userDoc = await adminDb.collection('users').doc(userDataClient.uid).get();
+    if (!userDoc.exists) return { allowed: false, message: "User profile not found" };
+    
+    const userData = userDoc.data() as any;
+    
+    if (userData.plan === 'monthly' || userData.plan === 'yearly') return { allowed: true };
+    
+    const trialStart = userData.trialStart ? (userData.trialStart.toDate ? userData.trialStart.toDate() : new Date(userData.trialStart)) : null;
+    if (!trialStart) return { allowed: false, message: "No active trial found" };
+    
+    const today = new Date();
+    const trialDurationMs = 7 * 24 * 60 * 60 * 1000;
+    const isTrialExpired = (today.getTime() - trialStart.getTime()) > trialDurationMs;
+    
+    if (isTrialExpired) {
+      return { 
+        allowed: false, 
+        message: "Your 7-day free trial has expired. Please upgrade to a premium plan to continue using AI features.",
+        expired: true
+      };
+    }
+    
+    return { allowed: true };
+  } catch (err) {
+    console.error("Access check error:", err);
+    return { allowed: false, message: "Error verifying access" };
+  }
+};
 
 // --- API ROUTES ---
 
+// Stripe Checkout Session
+app.post("/api/checkout/create-session", async (req, res) => {
+  const { planType, customerEmail } = req.body;
+  const priceId = (PRICE_IDS as any)[planType];
+
+  if (!priceId) {
+    return res.status(400).json({ error: "Invalid plan selected. Choose 'monthly' or 'yearly'." });
+  }
+
+  try {
+    const stripe = getStripe();
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      customer_email: customerEmail,
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      subscription_data: {
+        trial_period_days: 7,
+      },
+      metadata: {
+        uid: req.body.uid,
+        planType: planType
+      },
+      success_url: `${req.headers.origin}/settings?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${req.headers.origin}/settings?canceled=true`,
+    });
+    res.json({ url: session.url });
+  } catch (error: any) {
+    console.error("Stripe Checkout Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Scout: Video Curation
 app.post("/api/scout/videos", async (req, res) => {
-  const { courseName } = req.body;
+  const { courseName, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+  
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `You are Scout, an AI tutor for MAKE ME LEARN. For the course: ${courseName}, suggest 3 high-quality YouTube tutorial videos. Return ONLY valid JSON: [{ "title": "...", "youtubeId": "...", "duration": "...", "reason": "..." }] Only return real, existing YouTube video IDs. Focus on beginner-to-advanced progression.`,
@@ -56,8 +209,12 @@ app.post("/api/scout/videos", async (req, res) => {
 
 // Scout: Study Notes
 app.post("/api/scout/notes", async (req, res) => {
-  const { courseName, modulesList } = req.body;
+  const { courseName, modulesList, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `You are Scout, AI tutor for MAKE ME LEARN. Generate comprehensive study notes for:
@@ -77,8 +234,12 @@ app.post("/api/scout/notes", async (req, res) => {
 
 // Scout: Module Specific Notes
 app.post("/api/scout/module-notes", async (req, res) => {
-  const { courseName, moduleName } = req.body;
+  const { courseName, moduleName, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `You are Scout, AI tutor for MAKE ME LEARN. Generate a comprehensive module study guide for:
@@ -109,11 +270,24 @@ app.post("/api/scout/module-notes", async (req, res) => {
 
 // Scout: Dashboard Widget
 app.post("/api/scout/dashboard", async (req, res) => {
+  const { userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Generate a "Scout's Pick Today" for a learning dashboard. Return JSON with:
-      { "module": "Recommended module to review", "tip": "A concept tip", "challenge": "A small practice challenge" }`,
+      contents: `Generate a "Scout's Pick Today" for a learning dashboard.
+      Choose ONE from these courses: ["python-dev: Python Dev", "ios-swift: iOS & Swift", "ai-art: AI Art & Design", "fullstack: Fullstack Web"].
+      Return ONLY valid JSON:
+      { 
+        "courseId": "the-id", 
+        "courseTitle": "Course Title", 
+        "module": "A specific module from that course", 
+        "tip": "A helpful concept tip", 
+        "challenge": "A small practice challenge" 
+      }`,
       config: {
         responseMimeType: "application/json",
       }
@@ -128,8 +302,12 @@ app.post("/api/scout/dashboard", async (req, res) => {
 
 // General Chat / AI Tutor
 app.post("/api/chat", async (req, res) => {
-  const { messages, context } = req.body;
+  const { messages, context, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const chat = ai.chats.create({
       model: "gemini-3-flash-preview",
       config: {
@@ -152,8 +330,12 @@ app.post("/api/chat", async (req, res) => {
 
 // Image Generation
 app.post("/api/generate-image", async (req, res) => {
-  const { prompt, aspectRatio = "1:1" } = req.body;
+  const { prompt, aspectRatio = "1:1", userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-image",
       contents: {
@@ -188,8 +370,12 @@ app.post("/api/generate-image", async (req, res) => {
 
 // Video Generation (Start)
 app.post("/api/generate-video", async (req, res) => {
-  const { prompt, aspectRatio = "16:9" } = req.body;
+  const { prompt, aspectRatio = "16:9", userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const operation = await ai.models.generateVideos({
       model: 'veo-3.1-lite-generate-preview',
       prompt: prompt,
@@ -210,6 +396,7 @@ app.post("/api/generate-video", async (req, res) => {
 app.post("/api/video-status", async (req, res) => {
   const { operationName } = req.body;
   try {
+    const ai = getAI();
     const op = new GenerateVideosOperation();
     op.name = operationName;
     const updated = await ai.operations.getVideosOperation({ operation: op });
@@ -224,6 +411,7 @@ app.post("/api/video-status", async (req, res) => {
 app.post("/api/video-download", async (req, res) => {
   const { operationName } = req.body;
   try {
+    const ai = getAI();
     const op = new GenerateVideosOperation();
     op.name = operationName;
     const updated = await ai.operations.getVideosOperation({ operation: op });
@@ -253,8 +441,12 @@ app.post("/api/video-download", async (req, res) => {
 
 // Music Generation
 app.post("/api/generate-music", async (req, res) => {
-  const { prompt } = req.body;
+  const { prompt, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContentStream({
       model: "lyria-3-clip-preview",
       contents: prompt,
@@ -288,8 +480,12 @@ app.post("/api/generate-music", async (req, res) => {
 
 // Video Content Analysis
 app.post("/api/analyze-video", async (req, res) => {
-  const { videoData, mimeType, prompt } = req.body;
+  const { videoData, mimeType, prompt, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: {
@@ -308,8 +504,12 @@ app.post("/api/analyze-video", async (req, res) => {
 
 // Audio Transcription
 app.post("/api/transcribe", async (req, res) => {
-  const { audioData, mimeType } = req.body;
+  const { audioData, mimeType, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview", 
       contents: {

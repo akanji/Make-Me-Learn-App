@@ -41,7 +41,24 @@ export function AiTutor() {
         enrolledCourses: enrolledTrackTitles,
         currentProgress: userData?.progress || {}
       };
-      const response = await callAiChat([...messages, userMessage].map(m => ({ role: m.role === 'scout' ? 'assistant' : 'user', content: m.content })), context);
+      
+      const response = await callAiChat(
+        [...messages, userMessage].map(m => ({ 
+          role: m.role === 'scout' ? 'assistant' : 'user', 
+          content: m.content 
+        })), 
+        context,
+        userData
+      );
+
+      if (response.error) {
+        setMessages(prev => [...prev, { 
+          role: 'scout', 
+          content: response.error + (response.expired ? " You should head over to Settings to upgrade your plan." : "")
+        }]);
+        return;
+      }
+
       setMessages(prev => [...prev, { role: 'scout', content: response.text }]);
     } catch (err) {
       console.error(err);

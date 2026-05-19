@@ -118,7 +118,11 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
       const last = localStorage.getItem('last_ai_refresh');
       if (!last || now - parseInt(last) > 86400000) {
         console.log('[A2A-CONTENT] Refreshing AI recommendations...');
-        const pick = await callScoutDashboard();
+        const pick = await callScoutDashboard(userData);
+        if (pick.error) {
+          console.warn('[A2A-CONTENT] Access denied/error:', pick.error);
+          return;
+        }
         setScoutPick(pick);
         setLastContentRefresh(now);
         localStorage.setItem('last_ai_refresh', now.toString());

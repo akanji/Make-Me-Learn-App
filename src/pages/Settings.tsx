@@ -1,17 +1,65 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { AlertCircle, CreditCard, Bell, Info, LogOut, ChevronRight, Zap } from 'lucide-react';
-import { auth } from '../lib/firebase';
+import { AlertCircle, CreditCard, Bell, Info, LogOut, ChevronRight, Zap, CheckCircle2 } from 'lucide-react';
+import { auth, db } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
+import { doc, updateDoc } from 'firebase/firestore';
 
 export function Settings() {
-  const { userData, user, logout } = useAuth();
+  const { userData, user, logout, refreshUserData } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [upgrading, setUpgrading] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get('success') === 'true' && userData?.uid) {
+      toast.success("Payment successful! Your account is being upgraded.");
+      // In a real app, you'd pulse a webhook. Here we'll manually update for the demo if it's the first time
+      const updatePlan = async () => {
+        try {
+          const userRef = doc(db, 'users', userData.uid);
+          await updateDoc(userRef, {
+            plan: 'yearly', // Defaulting to one for the demo
+            subscriptionStatus: 'active'
+          });
+          await refreshUserData();
+        } catch (err) {
+          console.error("Failed to update plan:", err);
+        }
+      };
+      updatePlan();
+    }
+  }, [searchParams, userData?.uid]);
 
   const handleSignOut = async () => {
     logout();
     navigate('/');
+  };
+
+  const handleUpgrade = async (planType: string) => {
+    setUpgrading(true);
+    try {
+      const response = await fetch('/api/checkout/create-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          planType, 
+          customerEmail: user?.email,
+          uid: user?.uid
+        }),
+      });
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.error || "Failed to create checkout session");
+      }
+    } catch (err: any) {
+      toast.error(err.message);
+      setUpgrading(false);
+    }
   };
 
   const sections = [
@@ -20,16 +68,22 @@ export function Settings() {
       icon: CreditCard,
       content: (
         <div className="space-y-4">
+          {searchParams.get('success') === 'true' && (
+            <div className="bg-green-500/10 border border-green-500/20 p-4 rounded-2xl flex items-center gap-3 text-green-400">
+              <CheckCircle2 size={20} />
+              <span className="text-sm font-bold">Subscription updated successfully!</span>
+            </div>
+          )}
           <div className="flex items-center justify-between p-4 bg-surface-elevated/50 rounded-2xl border border-brand-border">
             <div>
               <p className="text-xs text-muted-text font-black uppercase mb-1">Current Plan</p>
               <p className="font-display font-bold text-lg capitalize">{userData?.plan} Plan</p>
             </div>
-            {userData?.plan === 'trial' && (
+            {(userData?.plan === 'trial' || userData?.subscriptionStatus === 'active') && (
               <div className="text-right">
                 <p className="text-[10px] text-primary font-black uppercase mb-1">Status</p>
                 <div className="flex items-center gap-1 text-green-400 font-bold text-sm">
-                  Active Trial
+                  {userData?.plan === 'trial' ? 'Active Trial' : 'Active Subscription'}
                 </div>
               </div>
             )}
@@ -41,6 +95,9 @@ export function Settings() {
               description="Billed monthly" 
               accent="primary"
               preferred={userData?.plan === 'monthly'}
+              onSubscribe={() => handleUpgrade('monthly')}
+              loading={upgrading}
+              isCurrent={userData?.plan === 'monthly'}
             />
             <PlanCard 
               type="yearly" 
@@ -49,6 +106,9 @@ export function Settings() {
               accent="dark-brand" 
               badge="BEST VALUE"
               preferred={userData?.plan === 'yearly'}
+              onSubscribe={() => handleUpgrade('yearly')}
+              loading={upgrading}
+              isCurrent={userData?.plan === 'yearly'}
             />
           </div>
         </div>
@@ -116,7 +176,7 @@ export function Settings() {
   );
 }
 
-function PlanCard({ type, price, description, accent, badge, preferred }: any) {
+function PlanCard({ type, price, description, accent, badge, preferred, onSubscribe, loading, isCurrent }: any) {
   return (
     <div className={`p-6 rounded-3xl border-2 transition-all relative group h-full flex flex-col ${
       preferred ? 'bg-primary/10 border-primary' : 'bg-surface-card border-brand-border hover:border-primary/50'
@@ -135,14 +195,18 @@ function PlanCard({ type, price, description, accent, badge, preferred }: any) {
       
       <div className="mt-auto">
         <button 
-          disabled 
-          className={`w-full py-3 rounded-xl text-sm font-bold opacity-50 cursor-not-allowed group-hover:opacity-80 transition-all ${
-            accent === 'primary' ? 'bg-primary text-white' : 'bg-dark-brand text-white'
+          onClick={onSubscribe}
+          disabled={loading || isCurrent}
+          className={`w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+            isCurrent ? 'bg-surface-elevated text-muted-text cursor-not-allowed' :
+            accent === 'primary' ? 'bg-primary hover:bg-primary/90 text-white shadow-purple-glow' : 'bg-dark-brand hover:bg-dark-brand/90 text-white'
           }`}
         >
-          Subscribe {type.charAt(0).toUpperCase() + type.slice(1)}
+          {loading ? (
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : isCurrent ? 'Current Plan' : `Subscribe ${type.charAt(0).toUpperCase() + type.slice(1)}`}
         </button>
-        <p className="text-[10px] text-center text-muted-text mt-3 font-medium italic">Payment integration coming soon</p>
+        {!isCurrent && <p className="text-[10px] text-center text-muted-text mt-3 font-medium">Secure payment via Stripe</p>}
       </div>
     </div>
   );

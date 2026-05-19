@@ -4,6 +4,7 @@ import { db } from '../lib/firebase';
 import { collection, query, getDocs } from 'firebase/firestore';
 import { COURSES } from '../constants';
 import { Award, Download, Share2, Search, Medal, ShieldCheck, GraduationCap } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Certificate {
@@ -89,9 +90,15 @@ export function Certificates() {
                   <button className="flex-1 bg-surface-elevated hover:bg-surface-base py-2.5 rounded-xl text-xs font-bold transition-all border border-white/5 flex items-center justify-center gap-2">
                     <Download size={14} /> PDF
                   </button>
-                  <button className="flex-1 bg-primary hover:bg-secondary py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
+                  <a 
+                    href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(window.location.origin)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 bg-primary hover:bg-secondary py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Share2 size={14} /> LinkedIn
-                  </button>
+                  </a>
                 </div>
               </motion.div>
             );
@@ -104,9 +111,9 @@ export function Certificates() {
           </div>
           <h2 className="text-2xl font-display font-black mb-2">No certificates yet</h2>
           <p className="text-muted-text mb-8 max-w-sm mx-auto">Complete a course and pass the final assessment to earn your professional certificate.</p>
-          <button className="bg-primary hover:bg-secondary text-white px-8 py-3 rounded-xl font-bold shadow-purple-glow transition-all">
+          <Link to="/courses" className="bg-primary hover:bg-secondary text-white px-8 py-3 rounded-xl font-bold shadow-purple-glow transition-all inline-block">
             Browse Courses
-          </button>
+          </Link>
         </div>
       )}
 

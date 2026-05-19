@@ -138,9 +138,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2">
               <span>🎉 Free Trial: {daysLeft} days remaining — Upgrade to keep learning</span>
             </div>
-            <button className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors">
+            <NavLink 
+              to="/settings"
+              className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg transition-colors"
+            >
               Upgrade →
-            </button>
+            </NavLink>
           </div>
         )}
 

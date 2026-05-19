@@ -14,22 +14,31 @@ import {
   CheckCircle,
   AlertCircle
 } from 'lucide-react';
-import { generateAiImage, generateAiVideo, generateAiMusic, checkVideoStatus } from '../lib/gemini';
+import { generateAiImage, generateAiVideo, generateAiMusic, checkVideoStatus, analyzeVideo, transcribeAudio } from '../lib/gemini';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function CreativeStudio() {
-  const [activeTool, setActiveTool] = useState<'image' | 'video' | 'music' | 'analyze'>('image');
+  const { userData } = useAuth();
+  const [activeTool, setActiveTool] = useState<'image' | 'video' | 'music' | 'analyze' | 'transcribe'>('image');
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [videoOp, setVideoOp] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [transcription, setTranscription] = useState<string | null>(null);
 
   const handleGenerateImage = async () => {
     setLoading(true);
     setResult(null);
     try {
-      const data = await generateAiImage(prompt, aspectRatio);
+      const data = await generateAiImage(prompt, userData, aspectRatio);
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       setResult({ type: 'image', url: data.imageUrl });
     } catch (err) {
       console.error(err);
@@ -42,7 +51,11 @@ export function CreativeStudio() {
     setLoading(true);
     setResult(null);
     try {
-      const data = await generateAiVideo(prompt, "16:9");
+      const data = await generateAiVideo(prompt, userData, "16:9");
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       setVideoOp(data.operationName);
       // In a real app, I'd poll from the UI
       setResult({ type: 'video_pending', op: data.operationName });
@@ -57,7 +70,11 @@ export function CreativeStudio() {
     setLoading(true);
     setResult(null);
     try {
-      const data = await generateAiMusic(prompt);
+      const data = await generateAiMusic(prompt, userData);
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       const binary = atob(data.audioData);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -67,6 +84,66 @@ export function CreativeStudio() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!file) {
+      toast.error("Please upload a video file to analyze.");
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        const data = await analyzeVideo(base64, file.type, userData, prompt);
+        if (data.error) {
+          toast.error(data.error);
+          setLoading(false);
+          return;
+        }
+        setResult({ type: 'analysis', text: data.analysis });
+        setLoading(false);
+      };
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const handleTranscribe = async () => {
+    if (!file) {
+      toast.error("Please upload an audio file to transcribe.");
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        const data = await transcribeAudio(base64, file.type, userData);
+        if (data.error) {
+          toast.error(data.error);
+          setLoading(false);
+          return;
+        }
+        setResult({ type: 'transcription', text: data.transcription });
+        setLoading(false);
+      };
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
     }
   };
 
@@ -89,6 +166,7 @@ export function CreativeStudio() {
             { id: 'video', label: 'Video Gen', icon: Video },
             { id: 'music', label: 'Music Gen', icon: Music },
             { id: 'analyze', label: 'Analysis', icon: FileSearch },
+            { id: 'transcribe', label: 'Transcribe', icon: Mic },
           ].map(tool => (
             <button
               key={tool.id}
@@ -141,13 +219,55 @@ export function CreativeStudio() {
               </div>
             )}
 
+            {activeTool === 'analyze' && (
+              <div className="space-y-4">
+                <div className="p-10 border-2 border-dashed border-brand-border rounded-2xl flex flex-col items-center gap-4 hover:border-primary/50 transition-colors cursor-pointer relative">
+                  <input 
+                    type="file" 
+                    className="absolute inset-0 opacity-0 cursor-pointer" 
+                    onChange={onFileChange} 
+                    accept="video/*"
+                  />
+                  <div className="w-16 h-16 bg-surface-elevated rounded-full flex items-center justify-center">
+                    <Video className="text-muted-text" />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold">{file && file.type.startsWith('video') ? file.name : "Upload Video to Analyze"}</p>
+                    <p className="text-xs text-muted-text mt-1">MP4, WebM, MOV supported (max 20MB)</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTool === 'transcribe' && (
+              <div className="space-y-4">
+                <div className="p-10 border-2 border-dashed border-brand-border rounded-2xl flex flex-col items-center gap-4 hover:border-primary/50 transition-colors cursor-pointer relative">
+                  <input 
+                    type="file" 
+                    className="absolute inset-0 opacity-0 cursor-pointer" 
+                    onChange={onFileChange} 
+                    accept="audio/*"
+                  />
+                  <div className="w-16 h-16 bg-surface-elevated rounded-full flex items-center justify-center">
+                    <Mic className="text-muted-text" />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold">{file && file.type.startsWith('audio') ? file.name : "Upload Audio to Transcribe"}</p>
+                    <p className="text-xs text-muted-text mt-1">MP3, WAV, M4A supported (max 20MB)</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={() => {
                 if (activeTool === 'image') handleGenerateImage();
                 if (activeTool === 'video') handleGenerateVideo();
                 if (activeTool === 'music') handleGenerateMusic();
+                if (activeTool === 'analyze') handleAnalyze();
+                if (activeTool === 'transcribe') handleTranscribe();
               }}
-              disabled={loading || !prompt.trim()}
+              disabled={loading || (activeTool !== 'analyze' && activeTool !== 'transcribe' && !prompt.trim()) || ((activeTool === 'analyze' || activeTool === 'transcribe') && !file)}
               className="w-full bg-primary hover:bg-secondary text-white py-4 rounded-2xl font-black text-lg shadow-purple-glow transition-all flex items-center justify-center gap-3 disabled:opacity-50"
             >
               {loading ? <Loader2 className="animate-spin" /> : <Wand2 />}
@@ -184,6 +304,30 @@ export function CreativeStudio() {
                     <Music size={48} className="text-primary animate-float" />
                     <audio controls src={result.url} className="w-full" />
                     <a href={result.url} download="generated-track.wav" className="text-sm text-primary font-bold hover:underline">Download Track</a>
+                  </div>
+                )}
+
+                {result.type === 'analysis' && (
+                  <div className="text-left max-w-2xl mx-auto p-6 bg-surface-elevated rounded-2xl border border-primary/20 space-y-4">
+                    <div className="flex items-center gap-2 text-primary">
+                      <FileSearch size={20} />
+                      <span className="font-bold">Scout Analysis</span>
+                    </div>
+                    <div className="prose prose-invert max-w-none text-muted-text text-sm leading-relaxed whitespace-pre-wrap">
+                      {result.text}
+                    </div>
+                  </div>
+                )}
+
+                {result.type === 'transcription' && (
+                  <div className="text-left max-w-2xl mx-auto p-6 bg-surface-elevated rounded-2xl border border-primary/20 space-y-4">
+                    <div className="flex items-center gap-2 text-primary">
+                      <Mic size={20} />
+                      <span className="font-bold">Transcription</span>
+                    </div>
+                    <div className="p-4 bg-surface-base rounded-xl font-mono text-xs text-muted-text leading-relaxed whitespace-pre-wrap border border-white/5">
+                      {result.text}
+                    </div>
                   </div>
                 )}
 

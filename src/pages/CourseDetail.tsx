@@ -9,6 +9,7 @@ import { Markdown } from '../components/Markdown';
 import { callScoutVideos, callScoutNotes, callScoutModuleNotes } from '../lib/gemini';
 import { VideoPlayer } from '../components/VideoPlayer';
 import confetti from 'canvas-confetti';
+import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CheckCircle2, 
@@ -104,7 +105,11 @@ export function CourseDetail() {
     if (videos.length > 0) return;
     setLoading(true);
     try {
-      const data = await callScoutVideos(course.title);
+      const data = await callScoutVideos(course.title, userData);
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       setVideos(data);
     } catch (err) {
       console.error(err);
@@ -117,7 +122,11 @@ export function CourseDetail() {
     if (notes) return;
     setLoading(true);
     try {
-      const data = await callScoutNotes(course.title, course.modules);
+      const data = await callScoutNotes(course.title, course.modules, userData);
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
       setNotes(data.notes);
     } catch (err) {
       console.error(err);
@@ -133,10 +142,16 @@ export function CourseDetail() {
     if (!content) {
       setModuleLoading(true);
       try {
-        const data = await callScoutModuleNotes(course.title, moduleName);
+        const data = await callScoutModuleNotes(course.title, moduleName, userData);
+        if (data.error) {
+          toast.error(data.error);
+          setSelectedModule(null);
+          return;
+        }
         setGeneratedSyllabus(prev => ({ ...prev, [moduleName]: data }));
       } catch (err) {
         console.error(err);
+        setSelectedModule(null);
       } finally {
         setModuleLoading(false);
       }

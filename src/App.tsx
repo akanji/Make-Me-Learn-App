@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { A2AProvider } from './context/A2AContext';
 import { Layout } from './components/Layout';
@@ -65,12 +65,12 @@ function Paywall() {
           </div>
         </div>
 
-        <button 
-          onClick={() => window.location.href = '/settings'}
-          className="w-full bg-primary hover:bg-secondary text-white py-4 rounded-2xl font-black text-xl shadow-purple-glow transition-all"
+        <Link 
+          to="/settings"
+          className="w-full bg-primary hover:bg-secondary text-white py-4 rounded-2xl font-black text-xl shadow-purple-glow transition-all block"
         >
           Explore Plans →
-        </button>
+        </Link>
       </div>
     </div>
   );

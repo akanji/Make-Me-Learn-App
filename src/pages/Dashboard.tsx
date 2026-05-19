@@ -5,10 +5,11 @@ import { COURSES } from '../constants';
 import { ScoutAvatar } from '../components/ScoutAvatar';
 import { motion } from 'motion/react';
 import { BookOpen, GraduationCap, Award, Flame, ChevronRight, PlayCircle, Sparkles } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 export function Dashboard() {
   const { userData } = useAuth();
+  const navigate = useNavigate();
   const { scoutPick } = useA2A();
 
   const enrolledCourses = COURSES.filter(c => userData?.enrolled.includes(c.id));
@@ -31,7 +32,9 @@ export function Dashboard() {
             <p className="text-xs text-muted-text uppercase font-bold tracking-widest">Global Rank</p>
             <p className="text-xl font-display font-bold">#1,248</p>
           </div>
-          <div className="w-12 h-12 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+          <div className="bg-primary/20 p-2 rounded-full">
+            <Sparkles className="text-primary" size={24} />
+          </div>
         </div>
       </header>
 
@@ -145,9 +148,12 @@ export function Dashboard() {
                   </div>
                   <p className="text-sm font-bold">{scoutPick.challenge}</p>
                 </div>
-                <button className="w-full py-3 bg-primary text-white rounded-xl font-bold hover:bg-secondary transition-colors text-sm">
+                <Link 
+                  to={`/course/${scoutPick.courseId}`}
+                  className="w-full py-3 bg-primary text-white rounded-xl font-bold hover:bg-secondary transition-colors text-sm text-center block"
+                >
                   Start Training →
-                </button>
+                </Link>
               </div>
             ) : (
               <div className="animate-pulse space-y-4">
