@@ -64,6 +64,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (docSnap.exists()) {
         setUserData(docSnap.data() as UserData);
       } else if (uid === GUEST_AUTH_USER.uid) {
+        // Initialize guest doc in Firestore if missing
+        await setDoc(docRef, GUEST_USER_DATA, { merge: true });
         setUserData(GUEST_USER_DATA);
       } else {
         setUserData(null);
@@ -81,12 +83,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        fetchUserData(firebaseUser.uid).finally(() => setLoading(false));
+        fetchUserData(firebaseUser.uid)
+          .catch((err) => {
+            console.error("Auth init fetch error:", err);
+            setError(err instanceof Error ? err.message : "Failed to load user data");
+          })
+          .finally(() => setLoading(false));
       } else {
-        // Only set guest if explicitly requested or if we want to default to it
-        // For now, let's keep it null to show Splash, unless we are in guest mode
-        setUser(null);
-        setUserData(null);
+        // If we are currently a guest, don't clear the state when auth says null
+        setUser(current => {
+          if (current?.uid === GUEST_AUTH_USER.uid) return current;
+          setUserData(null);
+          return null;
+        });
         setLoading(false);
       }
     });
@@ -106,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signup = async (data: UserData) => {
     try {
       // In signup, we assume Firebase Auth user is already created and signed in
-      await setDoc(doc(db, 'users', data.uid), data);
+      await setDoc(doc(db, 'users', data.uid), data, { merge: true });
       setUserData(data);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `users/${data.uid}`);
@@ -116,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const continueAsGuest = async () => {
+    setLoading(true);
     try {
       setUser(GUEST_AUTH_USER);
       await fetchUserData(GUEST_AUTH_USER.uid);
@@ -123,6 +133,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error("Guest flow error:", err);
       // Fallback
       setUserData(GUEST_USER_DATA);
+    } finally {
+      setLoading(false);
     }
   };
 

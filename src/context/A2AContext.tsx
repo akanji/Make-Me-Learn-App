@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { callScoutDashboard } from '../lib/gemini';
 
 import { toast, Toaster } from 'sonner';
@@ -57,7 +57,7 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
     const validateAndRepairState = async () => {
       console.log('[A2A-ERROR-FIX] Scanning integrity...');
       let needsFix = false;
-      const repairedEnrolled = userData.enrolled.filter(id => {
+      const repairedEnrolled = (userData.enrolled || []).filter(id => {
         const exists = COURSES.some(c => c.id === id);
         if (!exists) {
           needsFix = true;
@@ -69,9 +69,9 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
       if (needsFix) {
         toast.info("A2A-FIX: Repaired course enrollments", { position: 'bottom-left' });
         try {
-          await updateDoc(doc(db, 'users', user.uid), {
+          await setDoc(doc(db, 'users', user.uid), {
             enrolled: repairedEnrolled
-          });
+          }, { merge: true });
           refreshUserData();
         } catch (err) {
           handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
@@ -85,16 +85,18 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
       
       // Check for progress anomalies
       let hasAnomaly = false;
-      const cleanProgress = { ...userData.progress };
+      const cleanProgress = { ...(userData.progress || {}) };
       
       Object.keys(cleanProgress).forEach(courseId => {
         const course = COURSES.find(c => c.id === courseId);
         if (course) {
           const modules = cleanProgress[courseId];
-          const uniqueModules = [...new Set(modules)].filter(m => course.modules.includes(m));
-          if (uniqueModules.length !== modules.length) {
-            cleanProgress[courseId] = uniqueModules;
-            hasAnomaly = true;
+          if (Array.isArray(modules)) {
+            const uniqueModules = [...new Set(modules)].filter(m => course.modules.includes(m));
+            if (uniqueModules.length !== modules.length) {
+              cleanProgress[courseId] = uniqueModules;
+              hasAnomaly = true;
+            }
           }
         }
       });
@@ -102,9 +104,9 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
       if (hasAnomaly) {
         toast.info("A2A-SYNC: Repaired progress discrepancies", { position: 'bottom-right' });
         try {
-          await updateDoc(doc(db, 'users', user.uid), {
+          await setDoc(doc(db, 'users', user.uid), {
             progress: cleanProgress
-          });
+          }, { merge: true });
           refreshUserData();
         } catch (err) {
           handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);

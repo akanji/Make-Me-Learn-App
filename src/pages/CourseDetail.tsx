@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { COURSES, ModuleContent } from '../constants';
 import { useAuth } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { ScoutAvatar } from '../components/ScoutAvatar';
 import { Markdown } from '../components/Markdown';
 import { callScoutVideos, callScoutNotes, callScoutModuleNotes } from '../lib/gemini';
@@ -64,10 +64,12 @@ export function CourseDetail() {
     setLoading(true);
     try {
       const userRef = doc(db, 'users', userData.uid);
-      await updateDoc(userRef, {
+      await setDoc(userRef, {
         enrolled: arrayUnion(course.id),
-        [`progress.${course.id}`]: []
-      });
+        progress: {
+          [course.id]: []
+        }
+      }, { merge: true });
       await refreshUserData();
       setActiveTab('modules');
     } catch (err) {
@@ -82,9 +84,11 @@ export function CourseDetail() {
     const isCompleted = completedModules.includes(moduleName);
     try {
       const userRef = doc(db, 'users', userData.uid);
-      await updateDoc(userRef, {
-        [`progress.${course.id}`]: isCompleted ? arrayRemove(moduleName) : arrayUnion(moduleName)
-      });
+      await setDoc(userRef, {
+        progress: {
+          [course.id]: isCompleted ? arrayRemove(moduleName) : arrayUnion(moduleName)
+        }
+      }, { merge: true });
       await refreshUserData();
       
       // Trigger confetti if this was the last module

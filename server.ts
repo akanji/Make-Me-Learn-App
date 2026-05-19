@@ -4,16 +4,21 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, Modality, GenerateContentResponse, GenerateVideosOperation, VideoGenerationReferenceType } from "@google/genai";
 import dotenv from "dotenv";
 import Stripe from "stripe";
-import * as admin from 'firebase-admin';
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
 
 dotenv.config();
 
 // Initialize Firebase Admin
-admin.initializeApp({
-  projectId: firebaseConfig.projectId
-});
-const adminDb = admin.firestore();
+try {
+  initializeApp({
+    projectId: firebaseConfig.projectId
+  });
+} catch (e) {
+  console.warn("Firebase Admin init warning:", e);
+}
+const adminDb = getFirestore(firebaseConfig.firestoreDatabaseId);
 
 const app = express();
 const PORT = 3000;
@@ -48,7 +53,7 @@ app.post("/api/webhook", express.raw({ type: 'application/json' }), async (req, 
           await adminDb.collection('users').doc(uid).update({
             plan: plan,
             subscriptionStatus: 'active',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            updatedAt: FieldValue.serverTimestamp()
           });
           console.log(`Updated plan for user ${uid} to ${plan}`);
         } catch (dbErr) {
@@ -92,6 +97,35 @@ function getStripe(): Stripe {
   return stripeClient;
 }
 
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, delay = 1500): Promise<T> {
+  let lastError: any;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      // Handle both numeric status codes and string-based error statuses from SDK
+      const status = error.status || error.code;
+      const isTransient = 
+        status === 503 || 
+        status === 429 || 
+        status === "UNAVAILABLE" ||
+        status === "RESOURCE_EXHAUSTED" ||
+        error.message?.includes("503") || 
+        error.message?.includes("429") ||
+        error.message?.includes("UNAVAILABLE") ||
+        error.message?.includes("high demand");
+      
+      if (!isTransient || i === maxRetries - 1) throw error;
+      
+      console.warn(`Transient error (${status || 'unknown'}), retrying in ${delay}ms... (Attempt ${i + 1}/${maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Exponential backoff
+    }
+  }
+  throw lastError;
+}
+
 const PRICE_IDS = {
   monthly: 'price_1TVOTlBMbxh6jv0CQyGrtMLL',
   yearly: 'price_1TVOYDBMbxh6jv0C3C9Y4AX9',
@@ -101,8 +135,21 @@ const PRICE_IDS = {
 const checkAccess = async (userDataClient: any) => {
   if (!userDataClient || !userDataClient.uid) return { allowed: false, message: "Authentication required" };
   
+  // Bypass access check for guest user
+  if (userDataClient.uid === 'guest_user_free_mode') return { allowed: true };
+  
   try {
-    const userDoc = await adminDb.collection('users').doc(userDataClient.uid).get();
+    let docRef = adminDb.collection('users').doc(userDataClient.uid);
+    let userDoc;
+    
+    try {
+      userDoc = await docRef.get();
+    } catch (e: any) {
+      console.warn("Retrying with default Firestore database...", e.message);
+      const defaultDb = getFirestore();
+      userDoc = await defaultDb.collection('users').doc(userDataClient.uid).get();
+    }
+
     if (!userDoc.exists) return { allowed: false, message: "User profile not found" };
     
     const userData = userDoc.data() as any;
@@ -179,8 +226,8 @@ app.post("/api/scout/videos", async (req, res) => {
   
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: `You are Scout, an AI tutor for MAKE ME LEARN. For the course: ${courseName}, suggest 3 high-quality YouTube tutorial videos. Return ONLY valid JSON: [{ "title": "...", "youtubeId": "...", "duration": "...", "reason": "..." }] Only return real, existing YouTube video IDs. Focus on beginner-to-advanced progression.`,
       config: {
         responseMimeType: "application/json",
@@ -198,12 +245,17 @@ app.post("/api/scout/videos", async (req, res) => {
           }
         }
       }
-    });
+    }));
     res.json(JSON.parse(response.text || "[]"));
   } catch (error: any) {
     console.error("Scout Videos Error:", error);
-    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED";
-    res.status(isQuota ? 429 : 500).json({ error: isQuota ? "Quota exceeded. Try again in a bit." : "Failed to curate videos" });
+    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.code === 429;
+    const isBusy = error.message?.includes("503") || error.status === "UNAVAILABLE" || error.code === 503;
+    
+    if (isQuota) return res.status(429).json({ error: "Quota exceeded. Please try again in a bit." });
+    if (isBusy) return res.status(503).json({ error: "The AI model is busy. Please try again shortly." });
+    
+    res.status(500).json({ error: "Failed to curate videos" });
   }
 });
 
@@ -215,20 +267,25 @@ app.post("/api/scout/notes", async (req, res) => {
 
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: `You are Scout, AI tutor for MAKE ME LEARN. Generate comprehensive study notes for:
       Course: ${courseName}
       Modules: ${modulesList}
       Format with: ## headings, bullet points, code examples where relevant,
       key terms in **bold**, and a 'Quick Recap' section at the end.
       Make it engaging and student-friendly.`,
-    });
+    }));
     res.json({ notes: response.text });
   } catch (error: any) {
     console.error("Scout Notes Error:", error);
-    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED";
-    res.status(isQuota ? 429 : 500).json({ error: isQuota ? "Quota exceeded. Try again in a bit." : "Failed to generate notes" });
+    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.code === 429;
+    const isBusy = error.message?.includes("503") || error.status === "UNAVAILABLE" || error.code === 503;
+    
+    if (isQuota) return res.status(429).json({ error: "Quota exceeded. Please try again in a bit." });
+    if (isBusy) return res.status(503).json({ error: "The AI model is busy. Please try again shortly." });
+    
+    res.status(500).json({ error: "Failed to generate notes" });
   }
 });
 
@@ -240,8 +297,8 @@ app.post("/api/scout/module-notes", async (req, res) => {
 
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: `You are Scout, AI tutor for MAKE ME LEARN. Generate a comprehensive module study guide for:
       Course: ${courseName}
       Module: ${moduleName}
@@ -259,12 +316,17 @@ app.post("/api/scout/module-notes", async (req, res) => {
       config: {
         responseMimeType: "application/json",
       }
-    });
+    }));
     res.json(JSON.parse(response.text || "{}"));
   } catch (error: any) {
     console.error("Scout Module Notes Error:", error);
-    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED";
-    res.status(isQuota ? 429 : 500).json({ error: isQuota ? "Quota exceeded. Try again in a bit." : "Failed to generate module details" });
+    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.code === 429;
+    const isBusy = error.message?.includes("503") || error.status === "UNAVAILABLE" || error.code === 503;
+    
+    if (isQuota) return res.status(429).json({ error: "Quota exceeded. Please try again in a bit." });
+    if (isBusy) return res.status(503).json({ error: "The AI model is busy. Please try again shortly." });
+    
+    res.status(500).json({ error: "Failed to generate module details" });
   }
 });
 
@@ -276,8 +338,8 @@ app.post("/api/scout/dashboard", async (req, res) => {
 
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: `Generate a "Scout's Pick Today" for a learning dashboard.
       Choose ONE from these courses: ["python-dev: Python Dev", "ios-swift: iOS & Swift", "ai-art: AI Art & Design", "fullstack: Fullstack Web"].
       Return ONLY valid JSON:
@@ -291,14 +353,31 @@ app.post("/api/scout/dashboard", async (req, res) => {
       config: {
         responseMimeType: "application/json",
       }
-    });
+    }));
     res.json(JSON.parse(response.text || "{}"));
   } catch (error: any) {
     console.error("Scout Dashboard Error:", error);
-    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED";
-    res.status(isQuota ? 429 : 500).json({ error: isQuota ? "Quota exceeded. Try again in a bit." : "Failed to generate dashboard pick" });
+    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.code === 429;
+    const isBusy = error.message?.includes("503") || error.status === "UNAVAILABLE" || error.code === 503;
+    
+    if (isQuota) return res.status(429).json({ error: "Quota exceeded. Please try again in a bit." });
+    if (isBusy) return res.status(503).json({ error: "The AI model is busy. Please try again shortly." });
+    
+    res.status(500).json({ error: "Failed to generate dashboard pick" });
   }
 });
+
+const SCOUT_PERSONA = `
+You are Scout AI Tutor, an expert educational guide for the MAKE ME LEARN platform. 
+Your mission is to teach concepts clearly and answer all questions comprehensively.
+Follow these rules:
+1. Explain complex topics using simple, universal language.
+2. Break down answers into structured, scannable steps.
+3. Provide practical examples to illustrate key points.
+4. Encourage critical thinking by asking a guiding question at the end.
+
+Additional Platform Context: You help students with Python Dev, Web Design, Mobile Dev, Game Design, Graphics Design, and UI/UX Design.
+`;
 
 // General Chat / AI Tutor
 app.post("/api/chat", async (req, res) => {
@@ -309,20 +388,27 @@ app.post("/api/chat", async (req, res) => {
   try {
     const ai = getAI();
     const chat = ai.chats.create({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       config: {
-        systemInstruction: `You are Scout, the AI learning assistant for MAKE ME LEARN Platform. You help students with Python Dev, Web Design, Mobile Dev, Game Design, Graphics Design, and UI/UX Design. Context: ${JSON.stringify(context)}. Be concise, educational, and encouraging. Use code blocks for code examples.`,
+        systemInstruction: `${SCOUT_PERSONA}\n\nCurrent Learning Context: ${JSON.stringify(context)}`,
+        temperature: 0.7,
       }
     });
 
     // Simple one-off response for now, simplified for the endpoint
     const lastMessage = messages[messages.length - 1].content;
-    const response = await chat.sendMessage({ message: lastMessage });
+    const response = await withRetry(() => chat.sendMessage({ message: lastMessage }));
     res.json({ text: response.text });
   } catch (error: any) {
     console.error("Chat Error:", error);
-    if (error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED") {
+    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.code === 429;
+    const isBusy = error.message?.includes("503") || error.status === "UNAVAILABLE" || error.code === 503;
+    
+    if (isQuota) {
       return res.status(429).json({ error: "Scout is a bit overwhelmed right now (Quota Exceeded). Please wait a moment or consider selecting a paid API key in Settings." });
+    }
+    if (isBusy) {
+      return res.status(503).json({ error: "Scout is currently busy with high demand. Please try again in a few seconds." });
     }
     res.status(500).json({ error: "Chat failed" });
   }
@@ -336,7 +422,7 @@ app.post("/api/generate-image", async (req, res) => {
 
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
+    const response = await withRetry(() => ai.models.generateContent({
       model: "gemini-2.5-flash-image",
       contents: {
         parts: [{ text: prompt }]
@@ -347,7 +433,7 @@ app.post("/api/generate-image", async (req, res) => {
           imageSize: "1K"
         }
       }
-    });
+    }));
     
     let base64 = "";
     for (const part of response.candidates?.[0]?.content?.parts || []) {
@@ -486,15 +572,15 @@ app.post("/api/analyze-video", async (req, res) => {
 
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.5-flash",
       contents: {
         parts: [
           { inlineData: { data: videoData, mimeType } },
           { text: prompt || "Analyze the content of this video and summarize key takeaways." }
         ]
       }
-    });
+    }));
     res.json({ analysis: response.text });
   } catch (error) {
     console.error("Video Analysis Error:", error);
@@ -510,15 +596,15 @@ app.post("/api/transcribe", async (req, res) => {
 
   try {
     const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview", 
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.5-flash", 
       contents: {
         parts: [
           { inlineData: { data: audioData, mimeType } },
           { text: "Transcribe the following audio exactly." }
         ]
       }
-    });
+    }));
     res.json({ transcription: response.text });
   } catch (error) {
     console.error("Transcription Error:", error);
