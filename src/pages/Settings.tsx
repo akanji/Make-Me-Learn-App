@@ -91,7 +91,7 @@ export function Settings() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <PlanCard 
               type="monthly" 
-              price="$19.99" 
+              price="$9.99" 
               description="Billed monthly" 
               accent="primary"
               preferred={userData?.plan === 'monthly'}
@@ -101,7 +101,7 @@ export function Settings() {
             />
             <PlanCard 
               type="yearly" 
-              price="$199.99" 
+              price="$99.99" 
               description="Save 17% annually" 
               accent="dark-brand" 
               badge="BEST VALUE"

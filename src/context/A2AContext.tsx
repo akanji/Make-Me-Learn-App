@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, getDocs } from 'firebase/firestore';
 import { callScoutDashboard } from '../lib/gemini';
 
 import { toast, Toaster } from 'sonner';
@@ -49,6 +49,7 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
   const { user, userData, refreshUserData } = useAuth();
   const [scoutPick, setScoutPick] = useState<any>(null);
   const [lastContentRefresh, setLastContentRefresh] = useState<number | null>(null);
+  const [systemError, setSystemError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user || !userData) return;
@@ -132,18 +133,59 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    // Agent 4: UI INTEGRITY
-    const verifyUIIntegrity = () => {
-      // Check that progress bars never exceed 100% or show NaN
-      // Logic would be specific to tracking elements if they were globally observable
-      console.log('[A2A-UI-CHECK] Verifying render nodes...');
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+
+    const fetchCertificatesFromFirestore = async () => {
+      if (!user) return [];
+      const colRef = collection(db, 'users', user.uid, 'certificates');
+      const snap = await getDocs(colRef);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     };
+
+    const fetchInitializationNodes = async () => {
+      return await fetchCertificatesFromFirestore();
+    };
+
+    const initializeFallbackState = () => {
+      console.log("[A2A-UI-CHECK] Initializing fallback state...");
+    };
+
+    const showSystemErrorBanner = (message: string) => {
+      setSystemError(message);
+    };
+
+    async function verifyRenderNodes() {
+      if (retryCount >= MAX_RETRIES) {
+        console.warn("[A2A-ERROR-FIX] Max initialization retries reached. Halting loop to prevent system thrashing.");
+        showSystemErrorBanner("Database connection failed. Please check permissions.");
+        return;
+      }
+
+      try {
+        console.log("[A2A-UI-CHECK] Verifying render nodes...");
+        const data = await fetchInitializationNodes();
+        
+        if (data.length > 0) {
+          console.log("[A2A-UI-CHECK] Active verified certificates found:", data.length);
+        }
+        
+        retryCount = 0;
+        setSystemError(null);
+      } catch (error: any) {
+        retryCount++;
+        console.error("[A2A-ERROR-FIX] Initialization caught safely:", error.message);
+        
+        console.log("[A2A-UI-CHECK] Initializing fallback state...");
+        initializeFallbackState();
+      }
+    }
 
     const agents = [
       new A2AAgent('ERROR-FIX', 60000, validateAndRepairState),
       new A2AAgent('DATA-SYNC', 300000, syncToFirestore),
       new A2AAgent('CONTENT', 3600000, refreshAIContent),
-      new A2AAgent('UI-CHECK', 5000, verifyUIIntegrity),
+      new A2AAgent('UI-CHECK', 5000, verifyRenderNodes),
     ];
 
     agents.forEach(a => a.start());
@@ -155,6 +197,12 @@ export function A2AProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <A2AContext.Provider value={{ lastContentRefresh, scoutPick }}>
+      {systemError && (
+        <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-3 text-center text-xs text-red-400 font-bold tracking-wide flex items-center justify-center gap-2.5 relative z-[9999] animate-pulse">
+          <span className="w-2 h-2 bg-red-500 rounded-full" />
+          <span>{systemError}</span>
+        </div>
+      )}
       {children}
       <Toaster theme="dark" position="bottom-right" richColors />
     </A2AContext.Provider>

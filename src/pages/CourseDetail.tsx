@@ -8,6 +8,7 @@ import { ScoutAvatar } from '../components/ScoutAvatar';
 import { Markdown } from '../components/Markdown';
 import { callScoutVideos, callScoutNotes, callScoutModuleNotes } from '../lib/gemini';
 import { VideoPlayer } from '../components/VideoPlayer';
+import { LabsPlayground } from '../components/LabsPlayground';
 import confetti from 'canvas-confetti';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
@@ -99,6 +100,12 @@ export function CourseDetail() {
           origin: { y: 0.6 },
           colors: ['#8B5CF6', '#EC4899', '#3B82F6']
         });
+        toast.success(`Congratulations! You completed the course material for "${course.title}". Redirecting to your Final Assessment!`, {
+          duration: 4000
+        });
+        setTimeout(() => {
+          navigate(`/assessment/${course.id}`);
+        }, 3000);
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${userData.uid}`);
@@ -163,9 +170,16 @@ export function CourseDetail() {
   };
 
   useEffect(() => {
+    setNotes(null);
+    setVideos([]);
+    setSelectedModule(null);
+    setGeneratedSyllabus({});
+  }, [id]);
+
+  useEffect(() => {
     if (activeTab === 'videos') fetchVideos();
     if (activeTab === 'notes') generateNotes();
-  }, [activeTab]);
+  }, [activeTab, id]);
 
   const copyToClipboard = () => {
     if (!notes) return;
@@ -418,9 +432,14 @@ export function CourseDetail() {
                                     <Zap size={20} />
                                     <h3 className="font-bold">Labs & Exercises</h3>
                                   </div>
-                                  <div className="bg-surface-base/50 p-6 rounded-2xl border border-white/5 italic text-sm">
+                                  <div className="bg-surface-base/50 p-6 rounded-2xl border border-white/5 italic text-sm mb-4">
                                     {content.labs}
                                   </div>
+                                  <LabsPlayground 
+                                    moduleName={selectedModule} 
+                                    courseTitle={course.title} 
+                                    labInstructions={content.labs} 
+                                  />
                                 </section>
 
                                 {content.videos && content.videos.length > 0 && (

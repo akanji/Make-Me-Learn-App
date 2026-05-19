@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, Award, Sparkles, Wand2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, Award, Sparkles, Wand2, Lock } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export function Assessments() {
@@ -22,6 +22,33 @@ export function Assessments() {
   const [submitting, setSubmitting] = useState(false);
 
   if (!course || !questions) return <div className="p-10 text-center">Assessment not found.</div>;
+
+  const completedModules = userData?.progress?.[course.id] || [];
+  const isUnlocked = completedModules.length === course.modules.length;
+
+  if (!isUnlocked) {
+    return (
+      <div className="min-h-screen bg-surface-base flex items-center justify-center p-6">
+        <div className="bg-surface-card border border-brand-border p-10 rounded-3xl max-w-md w-full text-center shadow-2xl space-y-6">
+          <div className="w-20 h-20 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto border border-red-500/10">
+            <Lock size={40} className="animate-bounce" />
+          </div>
+          <h2 className="text-3xl font-display font-black text-white">Assessment Locked</h2>
+          <p className="text-muted-text text-sm">
+            You must study and complete all learning modules for <strong className="text-white">{course.title}</strong> before accessing the final exam.
+          </p>
+          <div className="pt-2">
+            <Link 
+              to={`/course/${course.id}`} 
+              className="w-full bg-primary hover:bg-secondary text-white py-3 px-6 rounded-xl font-bold text-sm shadow-purple-glow transition-all block text-center"
+            >
+              Go to Course Modules ({completedModules.length} / {course.modules.length} Completed)
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isLastStep = currentStep === questions.length - 1;
 
@@ -54,12 +81,21 @@ export function Assessments() {
 
         // Save certificate
         const certId = `CERT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+        const currentDateText = new Date().toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
         await setDoc(doc(db, 'users', user.uid, 'certificates', certId), {
           userId: user.uid,
           courseId: course.id,
           issueDate: serverTimestamp(),
+          issueDateText: currentDateText,
+          recipientName: userData?.name || user.displayName || 'Distinguished Graduate',
           certificateId: certId,
-          score: finalScore
+          score: finalScore,
+          signedByAI: "Scout AI Assistant Coach",
+          digitalFingerprint: `SHA256-${Math.random().toString(16).substring(2, 8).toUpperCase()}`
         });
         await refreshUserData();
       }

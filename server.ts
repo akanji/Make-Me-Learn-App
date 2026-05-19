@@ -368,15 +368,24 @@ app.post("/api/scout/dashboard", async (req, res) => {
 });
 
 const SCOUT_PERSONA = `
-You are Scout AI Tutor, an expert educational guide for the MAKE ME LEARN platform. 
-Your mission is to teach concepts clearly and answer all questions comprehensively.
-Follow these rules:
-1. Explain complex topics using simple, universal language.
-2. Break down answers into structured, scannable steps.
-3. Provide practical examples to illustrate key points.
-4. Encourage critical thinking by asking a guiding question at the end.
+You are Scout, the master Python Coding Coach, Software Engineer, and Debugging Specialist on the MAKE ME LEARN platform. 
+Your core mission is to provide exceptional coding assistance, script analysis, and step-by-step debugging walkthroughs specifically tailored to the Python Dev course.
 
-Additional Platform Context: You help students with Python Dev, Web Design, Mobile Dev, Game Design, Graphics Design, and UI/UX Design.
+You MUST follow these strict teaching and tutoring rules:
+1. CODE WALKTHROUGHS & DEBUGGING INSTRUCTION:
+   - When a student asks for coding options, requests code, or poses a debugging issue, DO NOT simply dump raw solutions.
+   - Explain exactly WHY errors happen (such as IndentationError, SyntaxError, TypeError, KeyError, IndexError, ValueError, NameError) in highly accessible terms.
+   - Break down coding solutions into structured, highly scannable, step-by-step instructions.
+   - All code examples should follow clean PEP-8 style guidelines with clear variable names and inline comments.
+   - Use universal real-world metaphors to make abstract software mechanisms (like objects, dictionary keys, list operations, scopes, or decorators) extremely intuitive.
+
+2. LEVERAGE USER COURSE progress CONTEXT:
+   - Review the Current Learning Context (including username, enrolled tracks, and currentProgress of finished modules).
+   - Dynamically adapt ground-level instruction to reflect what the student has already covered. If they have completed Python basics or variable operators under course 'python-dev', reference those milestones to build confidence (e.g., "Since you have tackled 'Variables and Basic Operators', let's combine that with this loop condition...").
+   - Guide them gracefully towards the next milestones, referencing their completed curriculum.
+
+3. FOSTER ACTIVE LEARNING & INQUISITIVENESS:
+   - Conclude each response with an active check-for-understanding or a short interactive challenge question (e.g., "What do you think will happen if we pass an empty list to this function?") to spark critical thinking.
 `;
 
 // General Chat / AI Tutor
@@ -416,30 +425,46 @@ app.post("/api/chat", async (req, res) => {
 
 // Image Generation
 app.post("/api/generate-image", async (req, res) => {
-  const { prompt, aspectRatio = "1:1", userData } = req.body;
+  const { prompt, aspectRatio = "1:1", userData, model = "gemini-2.5-flash-image" } = req.body;
   const access = await checkAccess(userData);
   if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
 
   try {
     const ai = getAI();
-    const response = await withRetry(() => ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: {
-        parts: [{ text: prompt }]
-      },
-      config: {
-        imageConfig: {
-          aspectRatio,
-          imageSize: "1K"
-        }
-      }
-    }));
-    
     let base64 = "";
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        base64 = part.inlineData.data;
-        break;
+
+    if (model.startsWith("imagen-")) {
+      const response = await withRetry(() => ai.models.generateImages({
+        model: model,
+        prompt: prompt,
+        config: {
+          numberOfImages: 1,
+          outputMimeType: 'image/jpeg',
+          aspectRatio: aspectRatio,
+        }
+      }));
+      if (response.generatedImages?.[0]?.image?.imageBytes) {
+        base64 = response.generatedImages[0].image.imageBytes;
+      }
+    } else {
+      const response = await withRetry(() => ai.models.generateContent({
+        model: model,
+        contents: {
+          parts: [{ text: prompt }]
+        },
+        config: {
+          imageConfig: {
+            aspectRatio,
+            imageSize: "1K"
+          }
+        }
+      }));
+      
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          base64 = part.inlineData.data;
+          break;
+        }
       }
     }
     
@@ -448,33 +473,33 @@ app.post("/api/generate-image", async (req, res) => {
     } else {
       res.status(500).json({ error: "No image generated" });
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Image Gen Error:", error);
-    res.status(500).json({ error: "Image generation failed" });
+    res.status(500).json({ error: error.message || "Image generation failed" });
   }
 });
 
 // Video Generation (Start)
 app.post("/api/generate-video", async (req, res) => {
-  const { prompt, aspectRatio = "16:9", userData } = req.body;
+  const { prompt, aspectRatio = "16:9", userData, model = "veo-3.1-lite-generate-preview" } = req.body;
   const access = await checkAccess(userData);
   if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
 
   try {
     const ai = getAI();
     const operation = await ai.models.generateVideos({
-      model: 'veo-3.1-lite-generate-preview',
+      model: model,
       prompt: prompt,
       config: {
         numberOfVideos: 1,
-        resolution: '720p',
+        resolution: model === 'veo-3.1-lite-generate-preview' ? '720p' : '1080p',
         aspectRatio: aspectRatio
       }
     });
     res.json({ operationName: operation.name });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Video Gen Start Error:", error);
-    res.status(500).json({ error: "Video generation failed to start" });
+    res.status(500).json({ error: error.message || "Video generation failed to start" });
   }
 });
 
@@ -493,7 +518,7 @@ app.post("/api/video-status", async (req, res) => {
   }
 });
 
-// Video Download/Proxy
+// Video Download/Proxy (Optimized to download as block stream array buffer)
 app.post("/api/video-download", async (req, res) => {
   const { operationName } = req.body;
   try {
@@ -509,16 +534,9 @@ app.post("/api/video-download", async (req, res) => {
       headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY! },
     });
     
+    const arrayBuffer = await videoRes.arrayBuffer();
     res.setHeader('Content-Type', 'video/mp4');
-    const reader = videoRes.body?.getReader();
-    if (!reader) return res.status(500).json({ error: "Stream error" });
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(value);
-    }
-    res.end();
+    res.send(Buffer.from(arrayBuffer));
   } catch (error) {
     console.error("Video Download Error:", error);
     res.status(500).json({ error: "Failed to download video" });
@@ -527,14 +545,14 @@ app.post("/api/video-download", async (req, res) => {
 
 // Music Generation
 app.post("/api/generate-music", async (req, res) => {
-  const { prompt, userData } = req.body;
+  const { prompt, userData, model = "lyria-3-clip-preview" } = req.body;
   const access = await checkAccess(userData);
   if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
 
   try {
     const ai = getAI();
     const response = await ai.models.generateContentStream({
-      model: "lyria-3-clip-preview",
+      model: model,
       contents: prompt,
       config: {
         responseModalities: [Modality.AUDIO]
@@ -558,22 +576,22 @@ app.post("/api/generate-music", async (req, res) => {
     }
 
     res.json({ audioData: audioBase64, mimeType });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Music Gen Error:", error);
-    res.status(500).json({ error: "Music generation failed" });
+    res.status(500).json({ error: error.message || "Music generation failed" });
   }
 });
 
 // Video Content Analysis
 app.post("/api/analyze-video", async (req, res) => {
-  const { videoData, mimeType, prompt, userData } = req.body;
+  const { videoData, mimeType, prompt, userData, model = "gemini-2.5-flash" } = req.body;
   const access = await checkAccess(userData);
   if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
 
   try {
     const ai = getAI();
     const response = await withRetry(() => ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: model,
       contents: {
         parts: [
           { inlineData: { data: videoData, mimeType } },
@@ -582,33 +600,38 @@ app.post("/api/analyze-video", async (req, res) => {
       }
     }));
     res.json({ analysis: response.text });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Video Analysis Error:", error);
-    res.status(500).json({ error: "Video analysis failed" });
+    res.status(500).json({ error: error.message || "Video analysis failed" });
   }
 });
 
-// Audio Transcription
+// Audio Transcription (Chirp 2 speech translation configuration included)
 app.post("/api/transcribe", async (req, res) => {
-  const { audioData, mimeType, userData } = req.body;
+  const { audioData, mimeType, userData, model = "gemini-2.5-flash" } = req.body;
   const access = await checkAccess(userData);
   if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
 
   try {
     const ai = getAI();
+    const isChirp = model === "chirp-2-speech-to-text";
+    const promptText = isChirp 
+      ? "Transcribe the following audio precisely. Break it down using timestamps [MM:SS] and distinguish speakers (e.g., Speaker A, Speaker B) if there are multiple. Output with high academic and professional speech translation fidelity."
+      : "Transcribe the following audio exactly.";
+
     const response = await withRetry(() => ai.models.generateContent({
-      model: "gemini-2.5-flash", 
+      model: isChirp ? "gemini-2.5-flash" : model, 
       contents: {
         parts: [
           { inlineData: { data: audioData, mimeType } },
-          { text: "Transcribe the following audio exactly." }
+          { text: promptText }
         ]
       }
     }));
     res.json({ transcription: response.text });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Transcription Error:", error);
-    res.status(500).json({ error: "Transcription failed" });
+    res.status(500).json({ error: error.message || "Transcription failed" });
   }
 });
 

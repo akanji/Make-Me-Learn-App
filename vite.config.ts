@@ -15,6 +15,17 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              return 'vendor'; // Splitting heavy dependencies away from application logic
+            }
+          }
+        }
+      }
+    },
     server: {
       host: '0.0.0.0',
       port: 3000,

@@ -10,7 +10,10 @@ import { motion, AnimatePresence } from 'motion/react';
 export function AiTutor() {
   const { userData } = useAuth();
   const [messages, setMessages] = useState<{ role: 'user' | 'scout'; content: string }[]>([
-    { role: 'scout', content: `Hello! I'm Scout. I specialize in the tracks offered here at MAKE ME LEARN. How can I assist your learning journey today?` }
+    { 
+      role: 'scout', 
+      content: `Hello! I'm Scout, your Python Dev Coaching & Debugging Assistant. Let me check your course progress to customize our session...` 
+    }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,6 +26,26 @@ export function AiTutor() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  // Dynamically tailor the coach introduction based on python-dev completion context
+  useEffect(() => {
+    if (userData && messages.length === 1 && messages[0].content.includes("context")) {
+      const pythonProgress = userData.progress?.['python-dev'] || [];
+      const completedCount = pythonProgress.length;
+      
+      let greeting = `Hello ${userData.name || 'Developer'}! 👋 I am Scout, your dedicated **Python Dev Coaching & Debugging Companion**. 🐍 
+
+My focus is to help you master Python, squash frustrating bugs, step through stack traces, and construct clean, efficient script architectures.`;
+
+      if (completedCount > 0) {
+        greeting += `\n\nI see you have successfully completed **${completedCount} Python module${completedCount > 1 ? 's' : ''}** so far (your most recent milestone was: *${pythonProgress[pythonProgress.length - 1]}*)! 🚀 Let's extend that knowledge. What script are we debugging or writing today?`;
+      } else {
+        greeting += `\n\nI notice you are ready to make headway on your **Python Dev** course modules. Let's make sure your workspace and core syntax are completely rock solid! 💻 How can I help you jump in today?`;
+      }
+
+      setMessages([{ role: 'scout', content: greeting }]);
+    }
+  }, [userData, messages]);
 
   const handleSend = async (e?: React.FormEvent, customInput?: string) => {
     if (e) e.preventDefault();
@@ -68,9 +91,13 @@ export function AiTutor() {
     }
   };
 
-  const chips = userData?.enrolled.length 
-    ? [`Explain my ${COURSES.find(c => c.id === userData.enrolled[0])?.title} course`, 'How can I learn faster?', 'What is my next module?']
-    : ['Python loops explained', 'Web design principles', 'UI vs UX?', 'Game physics intro'];
+  const chips = [
+    "Debug a Python IndexError / IndexError: list index out of range",
+    "Explain Python Lists vs Dictionaries with examples",
+    "How does Object-Oriented Programming (OOP) work in Python?",
+    "Give me a PEP-8 clean decorator code walk-through",
+    "Test my knowledge with an interactive coding challenge"
+  ];
 
   return (
     <div className="h-[calc(100vh-64px)] lg:h-screen flex flex-col bg-surface-base">
@@ -78,7 +105,7 @@ export function AiTutor() {
         <div className="flex items-center gap-4">
           <ScoutAvatar />
           <div>
-            <h1 className="text-xl font-display font-black tracking-tight">Scout AI Tutor</h1>
+            <h1 className="text-xl font-display font-black tracking-tight flex items-center gap-2">Scout AI Python Coach <span className="bg-primary/20 text-primary border border-primary/20 text-[10px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Python Dev</span></h1>
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
               <span className="text-[10px] text-primary font-black uppercase tracking-widest">Active Curator</span>
@@ -151,7 +178,7 @@ export function AiTutor() {
           <form onSubmit={handleSend} className="relative">
             <input 
               className="w-full bg-surface-elevated/80 border border-brand-border focus:border-primary rounded-2xl py-4 pl-6 pr-16 text-white focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all shadow-xl"
-              placeholder="Ask Scout anything..."
+              placeholder="Ask Scout for Python help or code debugging..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={loading}
@@ -165,7 +192,7 @@ export function AiTutor() {
             </button>
           </form>
           <p className="text-[10px] text-muted-text text-center mt-4 uppercase tracking-widest font-black opacity-50">
-            Powered by Gemini 3.1 Pro Intelligence
+            Powered by Gemini 3.1 Pro Debugging Intelligence
           </p>
         </div>
       </div>

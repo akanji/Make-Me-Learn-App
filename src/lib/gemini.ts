@@ -64,19 +64,19 @@ export async function callAiChat(messages: { role: string; content: string }[], 
   });
 }
 
-export async function generateAiImage(prompt: string, userData: any, aspectRatio: string = "1:1") {
+export async function generateAiImage(prompt: string, userData: any, aspectRatio: string = "1:1", model: string = "gemini-2.5-flash-image") {
   return safeFetchJson("/api/generate-image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, aspectRatio, userData }),
+    body: JSON.stringify({ prompt, aspectRatio, userData, model }),
   });
 }
 
-export async function generateAiVideo(prompt: string, userData: any, aspectRatio: string = "16:9") {
+export async function generateAiVideo(prompt: string, userData: any, aspectRatio: string = "16:9", model: string = "veo-3.1-lite-generate-preview") {
   return safeFetchJson("/api/generate-video", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, aspectRatio, userData }),
+    body: JSON.stringify({ prompt, aspectRatio, userData, model }),
   });
 }
 
@@ -88,26 +88,38 @@ export async function checkVideoStatus(operationName: string) {
   });
 }
 
-export async function generateAiMusic(prompt: string, userData: any) {
+export async function downloadVideo(operationName: string): Promise<Blob> {
+  const res = await fetch("/api/video-download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operationName }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to download completed video resource: ${res.statusText}`);
+  }
+  return res.blob();
+}
+
+export async function generateAiMusic(prompt: string, userData: any, model: string = "lyria-3-clip-preview") {
   return safeFetchJson("/api/generate-music", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, userData }),
+    body: JSON.stringify({ prompt, userData, model }),
   });
 }
 
-export async function analyzeVideo(videoData: string, mimeType: string, userData: any, prompt?: string) {
+export async function analyzeVideo(videoData: string, mimeType: string, userData: any, prompt?: string, model: string = "gemini-2.5-flash") {
   return safeFetchJson("/api/analyze-video", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ videoData, mimeType, userData, prompt }),
+    body: JSON.stringify({ videoData, mimeType, userData, prompt, model }),
   });
 }
 
-export async function transcribeAudio(audioData: string, mimeType: string, userData: any) {
+export async function transcribeAudio(audioData: string, mimeType: string, userData: any, model: string = "gemini-2.5-flash") {
   return safeFetchJson("/api/transcribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ audioData, mimeType, userData }),
+    body: JSON.stringify({ audioData, mimeType, userData, model }),
   });
 }

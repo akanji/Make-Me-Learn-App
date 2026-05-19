@@ -8,6 +8,7 @@ import { AllCourses } from './pages/AllCourses';
 import { CourseDetail } from './pages/CourseDetail';
 import { AiTutor } from './pages/AiTutor';
 import { Assessments } from './pages/Assessments';
+import { AssessmentsList } from './pages/AssessmentsList';
 import { Certificates } from './pages/Certificates';
 import { Profile } from './pages/Profile';
 import { Settings } from './pages/Settings';
@@ -55,12 +56,12 @@ function Paywall() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left mb-10">
           <div className="bg-surface-elevated p-6 rounded-2xl border border-primary/30">
             <h3 className="font-bold mb-1">Monthly Plan</h3>
-            <p className="text-2xl font-display font-black">$19.99<span className="text-xs text-muted-text">/mo</span></p>
+            <p className="text-2xl font-display font-black">$9.99<span className="text-xs text-muted-text">/mo</span></p>
             <p className="text-xs text-muted-text mt-2">Billed monthly</p>
           </div>
           <div className="bg-surface-elevated p-6 rounded-2xl border border-dark-brand/30">
             <h3 className="font-bold mb-1 text-transparent bg-clip-text bg-gradient-to-r from-primary to-rich-wine">Yearly Plan</h3>
-            <p className="text-2xl font-display font-black">$199.99<span className="text-xs text-muted-text">/yr</span></p>
+            <p className="text-2xl font-display font-black">$99.99<span className="text-xs text-muted-text">/yr</span></p>
             <p className="text-xs text-muted-text mt-2">Save 17% annually</p>
           </div>
         </div>
@@ -89,7 +90,7 @@ export default function App() {
               <Route path="/course/:id" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
               <Route path="/tutor" element={<ProtectedRoute><AiTutor /></ProtectedRoute>} />
               <Route path="/creative" element={<ProtectedRoute><CreativeStudio /></ProtectedRoute>} />
-              <Route path="/assessments" element={<ProtectedRoute><AllCourses /></ProtectedRoute>} /> {/* List courses to pick assessment */}
+              <Route path="/assessments" element={<ProtectedRoute><AssessmentsList /></ProtectedRoute>} /> {/* List courses to pick assessment */}
               <Route path="/assessment/:id" element={<ProtectedRoute><Assessments /></ProtectedRoute>} />
               <Route path="/certificates" element={<ProtectedRoute><Certificates /></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

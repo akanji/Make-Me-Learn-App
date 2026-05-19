@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -18,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { toast } from 'sonner';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -118,6 +119,8 @@ export function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 export function Layout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const { userData } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const trialRemainingCount = () => {
     if (!userData?.trialEnd) return 0;
@@ -127,11 +130,31 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const daysLeft = trialRemainingCount();
 
+  const isFreeOrGuest = userData?.plan === 'free' || userData?.uid === 'guest_user_free_mode';
+
+  const handleGlobalInteraction = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isFreeOrGuest && location.pathname !== '/settings') {
+      const target = e.target as HTMLElement;
+      // Allow navigation clicks specifically on href="/settings" or buttons that trigger logout/etc.
+      const href = target.closest('a')?.getAttribute('href');
+      if (href === '/settings' || href === '/profile' || target.closest('button')?.innerText?.toLowerCase().includes('sign out')) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      toast.info("Active subscription is required to access premium courses. Redirecting to subscription plans...");
+      navigate('/settings');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface-base">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
       
-      <div className="lg:pl-72 flex flex-col min-h-screen pb-20 lg:pb-0">
+      <div 
+        className="lg:pl-72 flex flex-col min-h-screen pb-20 lg:pb-0"
+        onClickCapture={handleGlobalInteraction}
+      >
         {/* Trial Banner */}
         {userData?.plan === 'trial' && daysLeft > 0 && (
           <div className="bg-primary px-4 py-2 flex items-center justify-between text-white text-sm font-medium">

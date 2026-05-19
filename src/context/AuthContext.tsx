@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { COURSES } from '../constants';
 
 interface UserData {
   uid: string;
@@ -42,10 +43,10 @@ const GUEST_USER_DATA: UserData = {
   uid: "guest_user_free_mode",
   name: "Guest User",
   email: "",
-  plan: 'yearly',
-  subscriptionStatus: 'active',
+  plan: 'free',
+  subscriptionStatus: 'inactive',
   nameVerified: true,
-  enrolled: ['product-management-101', 'ai-fundamentals'],
+  enrolled: COURSES.map(c => c.id),
   progress: {},
   createdAt: new Date(),
 };
@@ -62,17 +63,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const docRef = doc(db, 'users', uid);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        setUserData(docSnap.data() as UserData);
+        const data = docSnap.data() as UserData;
+        const allCourseIds = COURSES.map(c => c.id);
+        data.enrolled = Array.from(new Set([...(data.enrolled || []), ...allCourseIds]));
+        setUserData(data);
       } else if (uid === GUEST_AUTH_USER.uid) {
         // Initialize guest doc in Firestore if missing
-        await setDoc(docRef, GUEST_USER_DATA, { merge: true });
-        setUserData(GUEST_USER_DATA);
+        await setDoc(docRef, { ...GUEST_USER_DATA, enrolled: COURSES.map(c => c.id) }, { merge: true });
+        setUserData({ ...GUEST_USER_DATA, enrolled: COURSES.map(c => c.id) });
       } else {
         setUserData(null);
       }
     } catch (err) {
       if (uid === GUEST_AUTH_USER.uid) {
-        setUserData(GUEST_USER_DATA);
+        setUserData({ ...GUEST_USER_DATA, enrolled: COURSES.map(c => c.id) });
       } else {
         handleFirestoreError(err, OperationType.GET, path);
       }
