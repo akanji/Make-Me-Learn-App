@@ -123,3 +123,11 @@ export async function transcribeAudio(audioData: string, mimeType: string, userD
     body: JSON.stringify({ audioData, mimeType, userData, model }),
   });
 }
+
+export async function callScoutCodeAudit(code: string, moduleName: string, courseTitle: string, userData: any) {
+  return safeFetchJson("/api/scout/code-audit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, moduleName, courseTitle, userData }),
+  });
+}

@@ -1,16 +1,92 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow any authenticated user to read initialization data
-    match /certificates/{certificateId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.token.admin == true;
-    }
     
-    // Also check if your app scans custom metadata paths
+    // Catch-all default deny to enforce secure-by-default access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return (isSignedIn() && request.auth.uid == userId) || (userId == "guest_user_free_mode");
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Users Collection & Profile Data ---
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      
+      // Secure layout validation helper for user profile registration
+      function isValidUser(data) {
+        return data.uid is string && data.uid.size() <= 128
+            && data.name is string && data.name.size() <= 128
+            && data.email is string && data.email.size() <= 256;
+      }
+
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      
+      allow update: if isOwner(userId) && (
+        incoming().uid == existing().uid
+      );
+
+      // --- Certificates Subcollection inside User ---
+      match /certificates/{certId} {
+        allow read: if isOwner(userId);
+        
+        function isValidCertificate(data) {
+          return data.userId is string && data.userId == userId
+              && data.courseId is string && data.courseId.size() <= 128
+              && data.certificateId is string && data.certificateId == certId
+              && data.score is number && data.score >= 0 && data.score <= 100;
+        }
+
+        allow create, update: if isOwner(userId) && isValidCertificate(incoming());
+        allow delete: if isOwner(userId);
+      }
+
+      // --- Enrollments Subcollection ---
+      match /enrollments/{courseId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // --- Snapshots Subcollection ---
+      match /snapshots/{snapshotId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // --- Global Certificates (Legacy/Fallback mapping) ---
+    match /certificates/{certificateId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // --- Nodes Collection ---
     match /nodes/{nodeId} {
-      allow read: if request.auth != null;
-      allow write: if false; 
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // --- Connection Verification / Connection test collection ---
+    match /test/{testId} {
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

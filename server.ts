@@ -388,6 +388,54 @@ You MUST follow these strict teaching and tutoring rules:
    - Conclude each response with an active check-for-understanding or a short interactive challenge question (e.g., "What do you think will happen if we pass an empty list to this function?") to spark critical thinking.
 `;
 
+// Scout: Python Code Structural Audit & Optimization suggestions
+app.post("/api/scout/code-audit", async (req, res) => {
+  const { code, moduleName, courseTitle, userData } = req.body;
+  const access = await checkAccess(userData);
+  if (!access.allowed) return res.status(403).json({ error: access.message, expired: (access as any).expired });
+
+  try {
+    const ai = getAI();
+    const prompt = `You are Scout, the master Python Coding Auditor on the MAKE ME LEARN platform.
+    Analyze the following Python code for the learning module "${moduleName}" in course "${courseTitle}":
+    
+    \`\`\`python
+    ${code}
+    \`\`\`
+    
+    Provide a highly structured, constructive, and educational audit of the code based on Python best practices.
+    Include the following sections in your output:
+    
+    1. **Optimization Score**: Give a percentage score (0-100) representing how close this code is to optimal Pythonic production code, along with a 1-sentence summary of your assessment.
+    2. **Complexity Analysis**: Provide the time complexity (Big O) and space complexity of the user's code with a brief explanation.
+    3. **PEP 8 & Style Guidelines**: List any style violations or improvements (like variable naming, spacing, comments, or standards).
+    4. **Best Practices & Optimizations**: Suggest specific, clear ways to optimize or improve the logic (such as using list comprehensions, built-in functions, proper exception handling, or scoping).
+    5. **Scout's Elegant Refactor**: Provide a fully optimized, beautifully structured rewrite of the code that follows Pythonic best practices, with inline comments explaining the changes. Include the python code in a markdown block.
+    6. **Interactive Challenge**: End with a single short, thought-provoking question or mini-challenge based on their code to foster active learning.
+    
+    Ensure your response is engaging, encouraging, and easy to read. Use clean Markdown styling.`;
+
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+    }));
+
+    res.json({ audit: response.text });
+  } catch (error: any) {
+    console.error("Scout Code Audit Error:", error);
+    const isQuota = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.code === 429;
+    const isBusy = error.message?.includes("503") || error.status === "UNAVAILABLE" || error.code === 503;
+    
+    if (isQuota) {
+      return res.status(429).json({ error: "Scout is a bit overwhelmed right now (Quota Exceeded). Please wait a moment." });
+    }
+    if (isBusy) {
+      return res.status(503).json({ error: "Scout is currently busy with high demand. Please try again in a few seconds." });
+    }
+    res.status(500).json({ error: "Code audit failed" });
+  }
+});
+
 // General Chat / AI Tutor
 app.post("/api/chat", async (req, res) => {
   const { messages, context, userData } = req.body;

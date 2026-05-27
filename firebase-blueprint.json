@@ -42,6 +42,18 @@
         "certificateId": { "type": "string" },
         "score": { "type": "number" }
       }
+    },
+    "LabSnapshot": {
+      "title": "LabSnapshot",
+      "description": "A saved snapshot of a user's Python lab code",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseTitle": { "type": "string" },
+        "moduleName": { "type": "string" },
+        "code": { "type": "string" },
+        "savedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -56,6 +68,10 @@
     "/users/{userId}/certificates/{certId}": {
       "schema": "Certificate",
       "description": "Earned certificates"
+    },
+    "/users/{userId}/snapshots/{snapshotId}": {
+      "schema": "LabSnapshot",
+      "description": "Saved lab practice code snapshots"
     }
   }
 }
