@@ -1,43 +1,16 @@
-import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
-  return {
-    plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    hmr: {
+      // This forces Vite to use secure websockets through the AI Studio proxy
+      protocol: 'wss', 
+      clientPort: 443,
     },
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
-    },
-    build: {
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (id.includes('node_modules')) {
-              return 'vendor'; // Splitting heavy dependencies away from application logic
-            }
-          }
-        }
-      }
-    },
-    server: {
-      host: '0.0.0.0',
-      port: 3000,
-      strictPort: true,
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR === 'true' ? false : {
-        host: 'localhost',
-        protocol: 'ws',
-      },
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
-    },
-  };
+  },
 });

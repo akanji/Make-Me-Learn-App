@@ -52,8 +52,26 @@ const GUEST_USER_DATA: UserData = {
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [userData, setUserData] = useState<UserData | null>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('_my_learn_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.user || null;
+      }
+    } catch {}
+    return null;
+  });
+  const [userData, setUserData] = useState<UserData | null>(() => {
+    try {
+      const saved = localStorage.getItem('_my_learn_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.userData || null;
+      }
+    } catch {}
+    return null;
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +85,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const allCourseIds = COURSES.map(c => c.id);
         data.enrolled = Array.from(new Set([...(data.enrolled || []), ...allCourseIds]));
         setUserData(data);
+        // Sync custom local storage session with latest DB data
+        const saved = localStorage.getItem('_my_learn_session');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            parsed.userData = data;
+            localStorage.setItem('_my_learn_session', JSON.stringify(parsed));
+          } catch {}
+        }
       } else if (uid === GUEST_AUTH_USER.uid) {
         // Initialize guest doc in Firestore if missing
         await setDoc(docRef, { ...GUEST_USER_DATA, enrolled: COURSES.map(c => c.id) }, { merge: true });
@@ -84,6 +111,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // If we already loaded a custom session, set loading to false immediately
+    const saved = localStorage.getItem('_my_learn_session');
+    if (saved) {
+      setLoading(false);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
@@ -94,9 +127,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           })
           .finally(() => setLoading(false));
       } else {
-        // If we are currently a guest, don't clear the state when auth says null
+        // If we are currently in a custom session or guest session, don't wipe it
         setUser(current => {
           if (current?.uid === GUEST_AUTH_USER.uid) return current;
+          
+          try {
+            const savedSession = localStorage.getItem('_my_learn_session');
+            if (savedSession) {
+              const parsed = JSON.parse(savedSession);
+              if (parsed.user) {
+                return parsed.user;
+              }
+            }
+          } catch {}
+          
           setUserData(null);
           return null;
         });
@@ -109,8 +153,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = (data: UserData) => {
     try {
-      // This is now handled by onAuthStateChanged after the actual auth sign-in
       setUserData(data);
+      const mockUser = {
+        uid: data.uid,
+        email: data.email,
+        displayName: data.name
+      } as FirebaseUser;
+      setUser(mockUser);
+      localStorage.setItem('_my_learn_session', JSON.stringify({ user: mockUser, userData: data }));
     } catch (err) {
       console.error("Login state update error:", err);
     }
@@ -118,13 +168,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = async (data: UserData) => {
     try {
-      // In signup, we assume Firebase Auth user is already created and signed in
       await setDoc(doc(db, 'users', data.uid), data, { merge: true });
       setUserData(data);
+      const mockUser = {
+        uid: data.uid,
+        email: data.email,
+        displayName: data.name
+      } as FirebaseUser;
+      setUser(mockUser);
+      localStorage.setItem('_my_learn_session', JSON.stringify({ user: mockUser, userData: data }));
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `users/${data.uid}`);
-      // Don't re-throw unless we want the UI to handle it specifically, 
-      // but let's ensure it's logged.
     }
   };
 
@@ -133,6 +187,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setUser(GUEST_AUTH_USER);
       await fetchUserData(GUEST_AUTH_USER.uid);
+      localStorage.setItem('_my_learn_session', JSON.stringify({ user: GUEST_AUTH_USER, userData: GUEST_USER_DATA }));
     } catch (err) {
       console.error("Guest flow error:", err);
       // Fallback
@@ -144,7 +199,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await signOut(auth);
+      localStorage.removeItem('_my_learn_session');
+      await signOut(auth).catch(() => {});
       setUser(null);
       setUserData(null);
     } catch (err) {

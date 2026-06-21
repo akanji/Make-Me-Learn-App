@@ -54,12 +54,38 @@
         "code": { "type": "string" },
         "savedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "User subscription data status",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "status": { "type": "string" },
+        "planId": { "type": "string" }
+      }
+    },
+    "CheckoutSession": {
+      "title": "CheckoutSession",
+      "description": "Stripe checkout session document written by the client",
+      "type": "object",
+      "properties": {
+        "price": { "type": "string" },
+        "success_url": { "type": "string" },
+        "cancel_url": { "type": "string" },
+        "url": { "type": "string" },
+        "error": { "type": "string" }
+      }
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
       "description": "User profile and subscription data"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "Subscription records managed by webhooks"
     },
     "/users/{userId}/enrollments/{courseId}": {
       "schema": "Enrollment",
@@ -72,6 +98,10 @@
     "/users/{userId}/snapshots/{snapshotId}": {
       "schema": "LabSnapshot",
       "description": "Saved lab practice code snapshots"
+    },
+    "/users/{userId}/checkout_sessions/{sessionId}": {
+      "schema": "CheckoutSession",
+      "description": "Checkout sessions for Stripe integration"
     }
   }
 }

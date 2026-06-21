@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { doc, getDocs, collection, query, where, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithCustomToken } from 'firebase/auth';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { GraduationCap, Mail, Lock, User, MapPin, ArrowLeft, CheckCircle2 } from 'lucide-react';
@@ -8,11 +9,23 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 
 export function Splash() {
-  const { signup, continueAsGuest } = useAuth();
+  const { login, signup, continueAsGuest } = useAuth();
+  const navigate = useNavigate();
+  
+  const promptSubscriptionSelection = (userId: string) => {
+    navigate('/settings');
+  };
+
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const handleTabChange = (newMode: 'login' | 'signup' | 'reset') => {
+    setMode(newMode);
+    setError(null);
+    setSuccessMessage(null);
+  };
 
   const [formData, setFormData] = useState({
     name: '',
@@ -49,8 +62,7 @@ export function Splash() {
       toast.success("Password reset email sent!");
       setSuccessMessage("Check your inbox for a secure link to reset your password.");
       setTimeout(() => {
-        setMode('login');
-        setSuccessMessage(null);
+        handleTabChange('login');
       }, 5000);
     } catch (err: any) {
       console.error(err);
@@ -81,12 +93,44 @@ export function Splash() {
 
       if (isSignInTab) {
         try {
-          // FIX: Use sign-in method for existing emails
+          // Attempt authentication via Express endpoint /api/auth/signin
+          const response = await fetch('/api/auth/signin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+
+          if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.error || "Authentication failed.");
+          }
+
+          const data = await response.json();
+          if (data.isCustomAuth && data.userData) {
+            login(data.userData);
+            toast.success("Welcome back!");
+            return;
+          }
+
+          if (data.customToken) {
+            await signInWithCustomToken(auth, data.customToken).catch((err) => {
+              console.warn("Client token signin failed, using custom local login state:", err);
+              if (data.userData) {
+                login(data.userData);
+                return;
+              }
+              throw err;
+            });
+            toast.success("Welcome back!");
+            return;
+          }
+
+          // Fallback to client-side login directly if token is missing
           await signInWithEmailAndPassword(auth, email, password);
           toast.success("Welcome back!");
         } catch (err: any) {
           // Check for legacy migration
-          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || (err.message && (err.message.includes("Authentication failed") || err.message.includes("credentials")))) {
             const q = query(collection(db, 'users'), where('email', '==', email));
             const querySnapshot = await getDocs(q);
             
@@ -106,7 +150,46 @@ export function Splash() {
           throw err;
         }
       } else {
-        // Sign up method only for the "Create Account" tab
+        // Attempt registration via Express endpoint /api/auth/signup
+        const response = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            password,
+            name: formData.name,
+            country: formData.country
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "Signup failed.");
+        }
+
+        const data = await response.json();
+        if (data.isCustomAuth && data.userData) {
+          await signup(data.userData);
+          toast.success("Account created successfully!");
+          promptSubscriptionSelection(data.uid);
+          return;
+        }
+
+        if (data.customToken) {
+          await signInWithCustomToken(auth, data.customToken).catch(async (err) => {
+            console.warn("Client token signup signin failed, registering custom session status:", err);
+            if (data.userData) {
+              await signup(data.userData);
+              return;
+            }
+            throw err;
+          });
+          toast.success("Account created successfully!");
+          promptSubscriptionSelection(data.uid);
+          return;
+        }
+
+        // Fallback to pure client-side signup if token missing
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const firebaseUser = userCredential.user;
 
@@ -131,6 +214,7 @@ export function Splash() {
 
         await signup(newUserData);
         toast.success("Account created successfully!");
+        promptSubscriptionSelection(firebaseUser.uid);
       }
     } catch (err: any) {
       let message = "An unexpected error occurred.";
@@ -180,7 +264,7 @@ export function Splash() {
           <div className="flex bg-surface-base/50 p-1 rounded-2xl mb-8 relative border border-brand-border h-14">
             <div className="flex-1 relative z-10">
               <button 
-                onClick={() => setMode('login')}
+                onClick={() => handleTabChange('login')}
                 className={`w-full h-full rounded-xl font-bold transition-colors duration-300 ${mode === 'login' ? 'text-white' : 'text-muted-text hover:text-white'}`}
               >
                 Sign In
@@ -188,7 +272,7 @@ export function Splash() {
             </div>
             <div className="flex-1 relative z-10">
               <button 
-                onClick={() => setMode('signup')}
+                onClick={() => handleTabChange('signup')}
                 className={`w-full h-full rounded-xl font-bold transition-colors duration-300 ${mode === 'signup' ? 'text-white' : 'text-muted-text hover:text-white'}`}
               >
                 Create Account
@@ -212,7 +296,7 @@ export function Splash() {
           </div>
         ) : (
           <button 
-            onClick={() => setMode('login')}
+            onClick={() => handleTabChange('login')}
             className="flex items-center gap-2 text-muted-text hover:text-primary transition-colors mb-6 font-bold"
           >
             <ArrowLeft size={18} /> Back to Sign In

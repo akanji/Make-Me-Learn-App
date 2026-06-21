@@ -5,7 +5,7 @@ import { auth, db } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 export function Settings() {
   const { userData, user, logout, refreshUserData } = useAuth();
@@ -40,6 +40,7 @@ export function Settings() {
 
   const handleUpgrade = async (planType: string) => {
     setUpgrading(true);
+    let apiFailed = false;
     try {
       const response = await fetch('/api/checkout/create-session', {
         method: 'POST',
@@ -53,11 +54,54 @@ export function Settings() {
       const data = await response.json();
       if (data.url) {
         window.location.href = data.url;
+        return;
       } else {
-        throw new Error(data.error || "Failed to create checkout session");
+        throw new Error(data.error || "Backend session setup unavailable");
       }
     } catch (err: any) {
-      toast.error(err.message);
+      console.warn("API base checkout session creation failed, fallback to Stripe Extension in Firestore:", err);
+      apiFailed = true;
+    }
+
+    if (apiFailed && user?.uid) {
+      try {
+        const prices: any = {
+          monthly: 'price_1TVOTlBMbxh6jv0CQyGrtMLL',
+          yearly: 'price_1TVOYDBMbxh6jv0C3C9Y4AX9'
+        };
+        const priceId = prices[planType];
+        
+        const docRef = doc(db, `users/${user.uid}/checkout_sessions`, 'current');
+        await setDoc(docRef, {
+          price: priceId,
+          success_url: window.location.origin + '/settings?success=true',
+          cancel_url: window.location.origin + '/settings?canceled=true',
+        });
+
+        // Listen for Stripe Firebase Extension to append the session url
+        const unsubscribe = onSnapshot(docRef, (snap) => {
+          const data = snap.data();
+          if (data?.url) {
+            unsubscribe();
+            window.location.href = data.url;
+          } else if (data?.error) {
+            unsubscribe();
+            toast.error(data.error.message || "Failed initializing payment gateway.");
+            setUpgrading(false);
+          }
+        });
+
+        // Safety timeout for checkout listener
+        setTimeout(() => {
+          unsubscribe();
+          setUpgrading(false);
+        }, 15000);
+
+      } catch (firestoreErr: any) {
+        toast.error(firestoreErr.message || "Stripe checkout failed initialization.");
+        setUpgrading(false);
+      }
+    } else {
       setUpgrading(false);
     }
   };

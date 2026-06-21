@@ -653,20 +653,42 @@ export function CourseDetail() {
         </div>
       </div>
 
-      {/* Back to Top */}
-      <AnimatePresence>
-        {showScrollTop && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="fixed bottom-8 right-8 w-12 h-12 bg-primary text-white rounded-full shadow-purple-glow z-50 flex items-center justify-center hover:bg-secondary transition-all"
-          >
-            <ChevronLeft className="rotate-90" />
-          </motion.button>
-        )}
-      </AnimatePresence>
+      {/* Floating Action Controls */}
+      <div className="fixed bottom-8 right-8 z-55 flex flex-col gap-3 items-end">
+        {/* Back to Top */}
+        <AnimatePresence>
+          {showScrollTop && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="w-12 h-12 bg-surface-card/90 border border-brand-border text-white rounded-full flex items-center justify-center hover:bg-surface-elevated/90 transition-all shadow-lg backdrop-blur-sm"
+              title="Scroll to Top"
+            >
+              <ChevronLeft className="rotate-90 text-muted-text hover:text-white" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+
+        {/* AI Tutor Floating Button */}
+        <motion.button
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => navigate('/tutor', { state: { courseTitle: course.title } })}
+          className="bg-primary hover:bg-secondary text-white px-5 py-3.5 rounded-full shadow-purple-glow font-bold flex items-center gap-2.5 transition-all border border-primary/20 group"
+          title={`Ask Scout about ${course.title}`}
+        >
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+          </span>
+          <MessageCircle size={18} className="group-hover:scale-110 transition-transform text-white" />
+          <span className="text-xs md:text-sm tracking-wide">Ask Scout AI</span>
+        </motion.button>
+      </div>
     </div>
   );
 }
